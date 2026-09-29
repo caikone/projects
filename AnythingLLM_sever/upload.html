@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>上传文档到 AnythingLLM</title>
+<style>
+  body { font-family: system-ui, sans-serif; display: flex; justify-content: center; padding-top: 80px; background: #f5f4f2; }
+  .card { background: rgba(255,255,255,.7); backdrop-filter: blur(12px); border-radius: 16px; padding: 28px; box-shadow: 0 8px 24px rgba(0,0,0,.08); width: 420px; }
+  button { margin-top: 12px; padding: 8px 16px; border-radius: 10px; border: none; background: #333; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #log { margin-top: 16px; font-size: 13px; white-space: pre-wrap; color: #555; min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h3>上传文档并向量化</h3>
+  <input type="file" id="file">
+  <br>
+  <button id="btn" onclick="run()">上传并向量化</button>
+  <div id="log"></div>
+</div>
+<script>
+const API = "http://localhost:3001/api";
+const KEY = "9A87SCW-GE34C8R-PW13JDM-3WSASVG";
+const log = document.getElementById("log");
+const btn = document.getElementById("btn");
+
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    ...options,
+    headers: { Authorization: "Bearer " + KEY, ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+  return data;
+}
+
+async function run() {
+  const file = document.getElementById("file").files[0];
+  if (!file) { log.textContent = "请先选择文件"; return; }
+  btn.disabled = true;
+  log.textContent = "";
+  const say = (m) => (log.textContent += m + "\n");
+  try {
+    say("1/3 获取工作区列表...");
+    const { workspaces } = await api("/v1/workspaces");
+    if (!workspaces || !workspaces.length) throw new Error("没有可用的工作区");
+    const slug = workspaces[0].slug;
+    say("工作区: " + workspaces[0].name + " (" + slug + ")");
+
+    say("2/3 上传文档...");
+    const fd = new FormData();
+    fd.append("file", file);
+    const up = await api("/v1/document/upload", { method: "POST", body: fd });
+    if (!up.success || !up.documents || !up.documents.length) throw new Error(up.error || "上传失败");
+    const docPath = up.documents[0].location;
+    say("已上传: " + docPath);
+
+    say("3/3 向量化嵌入中（可能需要一些时间）...");
+    const emb = await api("/v1/workspace/" + slug + "/update-embeddings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adds: [docPath] }),
+    });
+    if (emb.error) throw new Error(emb.error);
+    say("完成：文档已向量化嵌入。");
+  } catch (e) {
+    say("失败: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
