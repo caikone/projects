@@ -13,4 +13,4 @@ node_modules/
 .idea/
 .DS_Store
 config.ini
-.workbuddy\memory
+**/.workbuddy/memory/
