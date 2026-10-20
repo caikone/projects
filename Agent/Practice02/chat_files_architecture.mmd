@@ -1,0 +1,79 @@
+%% chat_files.py 代码架构图
+%% LLM 多轮连续对话 + Function Call（本地文件操作版）
+%% 可用任何支持 Mermaid 的工具渲染（VS Code Mermaid 插件、mermaid.live 等）
+
+flowchart TD
+    USER["用户（终端输入 / 命令行参数首问）"]
+
+    subgraph CONFIG["配置层"]
+        INI["config.ini [llm]<br/>base_url / api_key / model / timeout"]
+        LOAD["load_config()<br/>校验并读取配置"]
+        INI --> LOAD
+    end
+
+    subgraph MAIN["主控层 main()：交互循环 + 多轮上下文"]
+        INPUT["读取用户问题<br/>input() / sys.argv"]
+        HISTORY["history 聊天记录<br/>每轮完整携带"]
+        MSG["组装 messages<br/>= history + 当前 user 消息"]
+        LOOP{"工具调用循环<br/>最多 MAX_TOOL_ROUNDS = 10 轮"}
+        APPEND["assistant 消息（含 tool_calls）<br/>追加进 messages"]
+        SAVE["最终回答写入 history"]
+        ERR["异常处理：超时 / 连接失败 /<br/>HTTP 错误 / LLMStreamError / 解析失败"]
+    end
+
+    subgraph HTTP["LLM 通信层（流式 SSE）"]
+        STREAM["chat_stream()<br/>POST /chat/completions<br/>stream=True，携带 TOOLS 定义"]
+        SSE["逐行解析 SSE 分片<br/>data: {...} 直到 data: [DONE]"]
+        ROUND["stream_one_round()<br/>content 打字机打印；<br/>tool_calls 按 index 累积拼接"]
+        STREAM --> SSE --> ROUND
+    end
+
+    subgraph TOOL["工具调度层"]
+        RUN["run_tools()<br/>解析 arguments JSON 并分发；<br/>控制台打印超 300 字符自动截断，<br/>完整结果仍回传模型"]
+        IMPL["TOOL_IMPLS<br/>工具名 → 实现函数映射"]
+        RUN --> IMPL
+    end
+
+    subgraph IMPLS["工具实现层（12 个工具）"]
+        subgraph BASIC["日期 / 数学工具"]
+            GD["getDate<br/>subprocess 调本地 date / time"]
+            LY["isLeapYear<br/>纯 Python 格里高利历规则"]
+        end
+        subgraph FILE["本地文件操作工具（纯 Python）"]
+            CWD["getCurrentDirectory<br/>os.getcwd"]
+            LS["listDirectory<br/>os.scandir 一层列举"]
+            FT["getFileType<br/>扩展名 + mimetypes 推断"]
+            RF["readFile<br/>仅纯文本"]
+            CF["createFile<br/>自动建目录 / 不覆盖"]
+            EF["editFile<br/>替换或整体覆盖"]
+            MKD["createDirectory<br/>os.makedirs 递归"]
+            DD["deleteDirectory<br/>shutil.rmtree 支持非空"]
+            DF["deleteFile<br/>os.remove"]
+            RN["renameItem<br/>os.rename 文件/目录"]
+        end
+        HELPER["_read_text_file() 公共读取助手<br/>空字节检测二进制；UTF-8-BOM / UTF-8 / GBK<br/>依次探测；超 MAX_READ_BYTES = 1MB 截断"]
+        RF --> HELPER
+        EF --> HELPER
+    end
+
+    LLM[("LLM API<br/>OpenAI 兼容 /chat/completions")]
+    FS[("本地文件系统")]
+    OSCMD[("操作系统命令<br/>date / time")]
+
+    %% 主流程
+    USER --> INPUT --> MSG
+    HISTORY --> MSG
+    MSG --> LOOP
+    LOOP -->|"发起一轮流式请求"| STREAM
+    LOAD -.->|"base_url / api_key / model / timeout"| STREAM
+    STREAM <-->|"HTTP 请求 / SSE 响应"| LLM
+    ROUND -->|"delta 含 tool_calls"| APPEND --> RUN
+    IMPL --> GD & LY & CWD & LS & FT & RF & CF & EF & MKD & DD & DF & RN
+    RUN -->|"tool 消息（执行结果）喂回"| LOOP
+    ROUND -->|"无 tool_calls：最终文本"| SAVE --> HISTORY
+    STREAM -.->|"流内 error 对象"| ERR
+    LOOP -.->|"请求 / 解析异常"| ERR
+
+    %% 工具与外部资源交互
+    GD --> OSCMD
+    CWD & LS & FT & RF & CF & EF & MKD & DD & DF & RN --> FS
