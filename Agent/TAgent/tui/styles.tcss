@@ -1,0 +1,208 @@
+/* TAgent TUI 样式表
+   ------------------------------------------------------------------
+   只关心视觉表现，不含任何逻辑；换主题 = 换这个文件。
+
+   注意：变量名统一加 `tui_` 前缀，**不要**覆盖 Textual 内置主题变量
+   （$panel / $surface / $accent / $error / $text …），
+   否则内置 CSS（如 Screen.-maximized-view 的 hatch 规则）会因重复替换而解析失败。
+*/
+
+$tui_bg: #0f1117;
+$tui_panel: #161a23;
+$tui_surface: #1c212c;
+$tui_border: #2a3140;
+$tui_text: #d7dce5;
+$tui_muted: #7d879c;
+$tui_accent: #6ea8fe;
+$tui_accent_soft: #3d5a8a;
+$tui_user: #7ee0c0;
+$tui_warn: #f0b45e;
+$tui_error: #ff7b72;
+$tui_ok: #56d364;
+
+* {
+    scrollbar-background: $tui_panel;
+    scrollbar-color: $tui_accent_soft;
+    scrollbar-size: 1 1;
+}
+
+Screen {
+    background: $tui_bg;
+    color: $tui_text;
+}
+
+Header {
+    background: $tui_panel;
+    color: $tui_accent;
+    height: 1;
+}
+
+Footer {
+    background: $tui_panel;
+    color: $tui_muted;
+}
+
+/* ---------------- 状态栏 ---------------- */
+StatusBar {
+    /* height 包含 border：1 行文字 + 1 行下边框，写 1 会被边框吃成 0 */
+    height: 2;
+    background: $tui_surface;
+    color: $tui_muted;
+    padding: 0 1;
+    border-bottom: solid $tui_border;
+}
+
+StatusBar .status-model {
+    width: 1fr;
+    color: $tui_muted;
+}
+
+StatusBar .status-state {
+    width: auto;
+    padding: 0 1;
+    text-style: bold;
+}
+
+StatusBar .status-stat {
+    width: auto;
+    color: $tui_muted;
+}
+
+StatusBar .state-idle     { color: $tui_muted; }
+StatusBar .state-thinking { color: $tui_accent; }
+StatusBar .state-tool     { color: $tui_warn; }
+StatusBar .state-error    { color: $tui_error; }
+
+/* ---------------- 主体 ---------------- */
+#body {
+    height: 1fr;
+}
+
+ChatView {
+    width: 1fr;
+    height: 1fr;
+    padding: 1 2;
+    background: $tui_bg;
+}
+
+ToolPanel {
+    width: 42;
+    height: 1fr;
+    background: $tui_panel;
+    border-left: solid $tui_border;
+    padding: 0 1;
+}
+
+ToolPanel.-hidden {
+    display: none;
+}
+
+ToolPanel .panel-title {
+    color: $tui_accent;
+    text-style: bold;
+    padding: 1 0 0 0;
+}
+
+.empty-hint {
+    color: $tui_muted;
+    padding: 1 0;
+}
+
+/* ---------------- 消息卡片 ---------------- */
+.card {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    border-left: thick $tui_border;
+}
+
+.card .card-sender {
+    color: $tui_muted;
+    text-style: bold;
+}
+
+.card .card-body {
+    padding: 0 1;
+}
+
+.card-user {
+    border-left: thick $tui_user;
+}
+
+.card-user .card-sender {
+    color: $tui_user;
+}
+
+.card-assistant {
+    border-left: thick $tui_accent_soft;
+}
+
+.card-assistant .card-sender {
+    color: $tui_accent;
+}
+
+.card-error {
+    border-left: thick $tui_error;
+}
+
+.card-error .card-sender {
+    color: $tui_error;
+}
+
+.card-system {
+    border-left: thick $tui_muted;
+}
+
+.card-system .card-sender {
+    color: $tui_muted;
+}
+
+.card MarkdownH1,
+.card MarkdownH2,
+.card MarkdownH3 {
+    color: $tui_accent;
+    margin: 0;
+}
+
+/* ---------------- 工具卡片 ---------------- */
+.tool-card {
+    height: auto;
+    margin: 0 0 1 0;
+    background: $tui_surface;
+    border-top: solid $tui_border;
+}
+
+.tool-card CollapsibleTitle {
+    color: $tui_muted;
+}
+
+.tool-card.tool-running CollapsibleTitle {
+    color: $tui_warn;
+    text-style: bold;
+}
+
+.tool-card.tool-ok CollapsibleTitle {
+    color: $tui_ok;
+}
+
+.tool-card.tool-fail CollapsibleTitle {
+    color: $tui_error;
+}
+
+.tool-card .tool-detail {
+    color: $tui_muted;
+    padding: 0 1;
+}
+
+/* ---------------- 输入区 ---------------- */
+ChatInput {
+    /* 同理：height 含上边框，这里给足 6 行可编辑区 */
+    height: 7;
+    background: $tui_surface;
+    border-top: solid $tui_border;
+    padding: 0 1;
+}
+
+ChatInput.input-locked {
+    border-top: solid $tui_warn;
+}

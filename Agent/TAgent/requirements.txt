@@ -1,0 +1,6 @@
+# TAgent 运行时依赖
+#
+# core 只依赖 requests（且仅出现在 core/infrastructure/llm/ 下）；
+# tui 依赖 textual。两者互不感知：不做 TUI 时可以只装 requests。
+requests>=2.31.0
+textual>=8.0.0
