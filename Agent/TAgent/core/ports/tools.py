@@ -26,6 +26,8 @@ class ParamSpec:
     description: str = ""
     enum: list[Any] | None = None
     default: Any = None
+    #: 数组元素的类型（type="array" 时必填，如 {"type": "string"}）
+    items: dict[str, Any] | None = None
 
     def to_json_schema(self) -> dict[str, Any]:
         schema: dict[str, Any] = {"type": self.type, "description": self.description}
@@ -33,6 +35,8 @@ class ParamSpec:
             schema["enum"] = self.enum
         if self.default is not None:
             schema["default"] = self.default
+        if self.items is not None:
+            schema["items"] = self.items
         return schema
 
 

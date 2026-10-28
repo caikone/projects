@@ -23,7 +23,7 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header
 
 from .bridge import AgentEventBridge
-from .widgets import ChatInput, ChatView, StatusBar, ToolPanel
+from .widgets import ChatInput, ChatView, StatusBar, ThinkingBar, ToolPanel
 
 #: 事件回流到 UI 线程的排空间隔（秒）
 DRAIN_INTERVAL = 1 / 30
@@ -42,6 +42,10 @@ class TAgentApp(App[None]):
         Binding("ctrl+x", "cancel_turn", "中止本轮"),
         Binding("ctrl+t", "toggle_tools", "工具面板"),
         Binding("ctrl+k", "clear_tools", "清空工具面板"),
+        # 对话区翻页：输入框有焦点时也要生效，所以用 priority
+        Binding("pageup", "scroll_chat_up", "上翻", priority=True, show=False),
+        Binding("pagedown", "scroll_chat_down", "下翻", priority=True, show=False),
+        Binding("ctrl+end", "scroll_chat_bottom", "跳到最新", priority=True, show=False),
     ]
 
     def __init__(self, ctx: FrontendContext) -> None:
@@ -53,6 +57,7 @@ class TAgentApp(App[None]):
         self._queue: Deque[object] = deque()
         self._queue_lock = threading.Lock()
         self._bridge: AgentEventBridge | None = None
+        self._multiline_input = False
         # 供界面展示的元信息
         self.config_source = str(ctx.metadata.get("config_source", ""))
 
@@ -70,6 +75,7 @@ class TAgentApp(App[None]):
         with Horizontal(id="body"):
             yield ChatView(id="chat")
             yield ToolPanel(id="tools")
+        yield ThinkingBar(id="thinking")
         yield ChatInput(id="input")
         yield Footer()
 
@@ -77,13 +83,16 @@ class TAgentApp(App[None]):
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
         status = self.query_one(StatusBar)
-        self._bridge = AgentEventBridge(chat=chat, tools=tools, status=status)
+        thinking = self.query_one(ThinkingBar)
+        self._bridge = AgentEventBridge(chat=chat, tools=tools, status=status,
+                                        thinking=thinking)
 
         # 事件回流泵：把工作线程产出的事件搬到 UI 线程
         self.set_interval(DRAIN_INTERVAL, self._drain_events)
 
         await chat.clear_messages()
         status.set_state("空闲", "idle")
+        thinking.set_idle(multiline=False)
         self.query_one(ChatInput).focus()
 
         prompt = self.ctx.initial_prompt
@@ -109,9 +118,21 @@ class TAgentApp(App[None]):
             return
 
         self._busy = True
-        self.query_one(ChatInput).lock_input()
+        chat_input = self.query_one(ChatInput)
+        chat_input.lock_input()
+        self.query_one(ChatView).stick_to_bottom()
         self.query_one(StatusBar).set_state("已发送，等待模型…", "thinking")
+        self.query_one(ThinkingBar).set_busy("已发送，等待模型…")
+        self._multiline_input = False
         self._run_turn(text)
+
+    async def on_text_area_changed(self, event: object) -> None:
+        """输入框内容变化时，同步更新第一行的按键提示（单行 / 多行）。"""
+        chat_input = self.query_one(ChatInput)
+        multiline = chat_input.is_multiline
+        if multiline != self._multiline_input:
+            self._multiline_input = multiline
+            self.query_one(ThinkingBar).set_hint(multiline)
 
     # ==================================================================
     # 后台执行（工作线程）
@@ -150,7 +171,9 @@ class TAgentApp(App[None]):
 
     def _finish_turn(self) -> None:
         self._busy = False
-        self.query_one(ChatInput).unlock_input()
+        chat_input = self.query_one(ChatInput)
+        chat_input.unlock_input()
+        self.query_one(ThinkingBar).set_idle(multiline=chat_input.is_multiline)
 
     # ==================================================================
     # 动作
@@ -172,7 +195,10 @@ class TAgentApp(App[None]):
         self.run_worker(tools.reset(), exclusive=False)
         status.set_turns(0, 0)
         status.set_state("新会话", "idle")
-        self.query_one(ChatInput).unlock_input()
+        chat_input = self.query_one(ChatInput)
+        chat_input.unlock_input()
+        self._multiline_input = False
+        self.query_one(ThinkingBar).set_idle(multiline=chat_input.is_multiline)
 
     def action_cancel_turn(self) -> None:
         """协作式中止当前轮次。"""
@@ -180,6 +206,7 @@ class TAgentApp(App[None]):
             return
         self._agent.request_cancel()
         self.query_one(StatusBar).set_state("正在中止…", "error")
+        self.query_one(ThinkingBar).set_busy("正在中止…")
 
     def action_toggle_tools(self) -> None:
         """显示 / 隐藏工具面板。"""
@@ -188,6 +215,19 @@ class TAgentApp(App[None]):
     def action_clear_tools(self) -> None:
         """清空工具面板内容。"""
         self.run_worker(self.query_one(ToolPanel).reset(), exclusive=False)
+
+    # ---------------- 对话区滚动 ----------------
+    def action_scroll_chat_up(self) -> None:
+        """向上翻一页（查看更早的内容）。"""
+        self.query_one(ChatView).scroll_page_up(animate=False)
+
+    def action_scroll_chat_down(self) -> None:
+        """向下翻一页。"""
+        self.query_one(ChatView).scroll_page_down(animate=False)
+
+    def action_scroll_chat_bottom(self) -> None:
+        """跳回最新内容并恢复自动跟随。"""
+        self.query_one(ChatView).stick_to_bottom()
 
     def action_quit(self) -> None:
         self.exit(0)

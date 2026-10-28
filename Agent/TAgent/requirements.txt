@@ -2,5 +2,7 @@
 #
 # core 只依赖 requests（且仅出现在 core/infrastructure/llm/ 下）；
 # tui 依赖 textual。两者互不感知：不做 TUI 时可以只装 requests。
+# fetchWeb 抓取工具依赖 trafilatura（仅出现在 core/infrastructure/webpage/ 下）。
 requests>=2.31.0
 textual>=8.0.0
+trafilatura>=2.0.0

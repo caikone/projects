@@ -20,10 +20,11 @@ from dataclasses import replace
 from typing import Iterable
 
 from ..errors import ConfigError
-from .models import AgentSettings, LLMSettings, default_config_paths, env_overrides
+from .models import AgentSettings, LLMSettings, SearchSettings, default_config_paths, env_overrides
 
 SECTION_LLM = "llm"
 SECTION_AGENT = "agent"
+SECTION_SEARCH = "search"
 
 _INT_FIELDS = {"max_tool_rounds", "max_read_bytes", "max_tool_display_len", "history_limit"}
 
@@ -113,6 +114,28 @@ def _agent_overrides(parser: configparser.ConfigParser) -> dict[str, object]:
     return overrides
 
 
+def _build_search(parser: configparser.ConfigParser) -> SearchSettings:
+    """解析 [search] 段。整段可缺省：返回默认（未配置）的 SearchSettings。"""
+    if not parser.has_section(SECTION_SEARCH):
+        return SearchSettings()
+
+    def get(key: str, default: str = "") -> str:
+        value = parser.get(SECTION_SEARCH, key, fallback=default)
+        return value.strip() if isinstance(value, str) else default
+
+    timeout_raw = get("timeout", "30")
+    try:
+        timeout = float(timeout_raw)
+    except ValueError:
+        timeout = 30.0
+
+    return SearchSettings(
+        baidu_qianfan_api_key=get("baidu_qianfan_api_key"),
+        base_url=get("base_url") or SearchSettings.base_url,
+        timeout=timeout,
+    )
+
+
 def load_settings(config_path: str | None = None,
                   search_paths: Iterable[str] | None = None) -> tuple[AgentSettings, str]:
     """加载配置。
@@ -147,7 +170,7 @@ def load_settings(config_path: str | None = None,
     except ConfigError as exc:
         raise ConfigError("%s（文件：%s）" % (exc.message, used))
 
-    settings = AgentSettings(llm=llm)
+    settings = AgentSettings(llm=llm, search=_build_search(parser))
     settings = settings.with_overrides(**_agent_overrides(parser))
 
     # 环境变量做字段级覆盖（密钥等敏感信息不必落盘）

@@ -18,16 +18,25 @@ from typing import Iterable
 
 from .config.loader import load_settings
 from .config.models import AgentSettings
+from .infrastructure.cli.local_subprocess import LocalSubprocessRunner
 from .infrastructure.llm.openai_compat import OpenAICompatibleClient
+from .infrastructure.search.baidu_qianfan import BaiduQianfanSearchClient
+from .infrastructure.webpage.curl_trafilatura import CurlTrafilaturaFetcher
 from .ports.frontend import FrontendContext
 from .ports.llm import LLMClient
 from .ports.tools import ToolRegistry
 from .services.agent import AgentService
 from .services.calendar import CalendarService
+from .services.cli import CommandService
 from .services.filesystem import FileSystemService
 from .services.session import Session
+from .services.webfetch import WebFetchService
+from .services.websearch import WebSearchService
+from .tools.builtin_cli import build_cli_tools
 from .tools.builtin_files import build_file_tools
+from .tools.builtin_search import build_search_tools
 from .tools.builtin_system import build_system_tools
+from .tools.builtin_webfetch import build_webfetch_tools
 from .tools.registry import InMemoryToolRegistry
 
 
@@ -66,10 +75,18 @@ class AppContainer:
 
         filesystem = FileSystemService(max_read_bytes=settings.max_read_bytes)
         calendar = CalendarService()
+        websearch = WebSearchService(
+            settings.search, BaiduQianfanSearchClient(settings.search))
+        webfetch = WebFetchService(CurlTrafilaturaFetcher())
+        # 本地命令行执行：当前不做白名单/审批，以运行 TAgent 的用户权限执行
+        cli = CommandService(LocalSubprocessRunner())
 
         registry = InMemoryToolRegistry()
         registry.register_many(build_system_tools(calendar))
         registry.register_many(build_file_tools(filesystem))
+        registry.register_many(build_search_tools(websearch))
+        registry.register_many(build_webfetch_tools(webfetch))
+        registry.register_many(build_cli_tools(cli))
 
         client = llm or OpenAICompatibleClient(settings.llm)
         agent = AgentService(llm=client, tools=registry, settings=settings)

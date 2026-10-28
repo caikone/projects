@@ -40,10 +40,37 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class SearchSettings:
+    """联网搜索相关配置（百度千帆智能搜索）。
+
+    全部字段均可为空/默认值：缺少密钥时不阻止应用启动，
+    而是在 searchwdb 工具被调用时返回清晰的错误信息。
+    """
+
+    #: 百度千帆智能搜索 API 密钥（config.ini [search] 段）
+    baidu_qianfan_api_key: str = ""
+    #: 智能搜索接口地址（OpenAI 兼容，代码自动拼接 /chat/completions）
+    base_url: str = "https://qianfan.baidubce.com/v2/ai_search"
+    #: 搜索请求超时时间（秒）
+    timeout: float = 30.0
+
+    @property
+    def chat_completions_url(self) -> str:
+        return self.base_url.rstrip("/") + "/chat/completions"
+
+    @property
+    def configured(self) -> bool:
+        """是否已配置好可用的搜索密钥。"""
+        return bool(self.baidu_qianfan_api_key)
+
+
+@dataclass(frozen=True)
 class AgentSettings:
     """Agent 运行时配置（LLM 配置 + 会话/工具策略）。"""
 
     llm: LLMSettings
+    #: 联网搜索配置（可缺省，缺省时 searchwdb 工具调用会返回错误提示）
+    search: SearchSettings = field(default_factory=SearchSettings)
 
     #: 单轮对话中允许的最大「模型请求 → 工具执行」循环次数（防止无限循环）
     max_tool_rounds: int = 10
@@ -55,7 +82,11 @@ class AgentSettings:
     system_prompt: str = (
         "你是一个可以操作本地文件的智能助手。"
         "需要获取信息或改变文件系统状态时，优先调用合适的工具，"
-        "再根据工具返回的结果用简洁的中文回答用户。"
+        "再根据工具返回的结果用中文回答用户。"
+        "回答原则：当用户只是想要概况、总结或询问问题时，用简洁的语言概括；"
+        "但当用户明确要求「原文」「全文」「完整内容」「详细内容」或"
+        "「把网页内容原样贴出来」时，必须把工具（如 fetchWeb）返回的"
+        "Markdown 正文尽可能完整、逐字地复述出来，不要自己概括、压缩或改写。"
     )
     #: 是否把系统提示词插入会话
     enable_system_prompt: bool = True
@@ -111,4 +142,4 @@ def default_config_paths() -> list[str]:
     return paths
 
 
-__all__ = ["LLMSettings", "AgentSettings", "env_overrides", "default_config_paths"]
+__all__ = ["LLMSettings", "SearchSettings", "AgentSettings", "env_overrides", "default_config_paths"]

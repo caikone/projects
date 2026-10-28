@@ -54,7 +54,8 @@ class ToolCallCard(Collapsible):
 
     def set_finished(self, ok: bool, content: str, elapsed_ms: int) -> None:
         mark = "✓" if ok else "✗"
-        self.title = "%s %s  (%d ms)" % (mark, self.tool_name, elapsed_ms)
+        self.title = "%s %s  (%d ms · %s 字符)" % (
+            mark, self.tool_name, elapsed_ms, len(content or ""))
         self.remove_class("tool-running")
         self.add_class("tool-ok" if ok else "tool-fail")
         self.detail_text = _preview(content)

@@ -204,6 +204,7 @@ class AgentService:
 
         text_parts: list[str] = []
         slots: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
 
         for chunk in self._llm.stream(request):
             if self._cancel.is_set():
@@ -211,6 +212,8 @@ class AgentService:
             if chunk.text:
                 text_parts.append(chunk.text)
                 yield AssistantTextDelta(turn_id=turn_id, text=chunk.text)
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
 
             for delta in chunk.tool_call_deltas:
                 slot = slots.setdefault(
@@ -221,6 +224,15 @@ class AgentService:
                     slot["name"] += delta.name
                 if delta.arguments_fragment:
                     slot["arguments"] += delta.arguments_fragment
+
+        if finish_reason == "length" and not slots:
+            # 输出达到 max_tokens 上限被截断：明确告知，而不是无声消失
+            yield ErrorOccurred(
+                turn_id=turn_id,
+                message="回复因达到单次输出上限（max_tokens）被截断，"
+                        "可让模型「接着上次继续」或调大 config.ini 里的 max_tokens。",
+                error_type="notice",
+            )
 
         tool_calls = [
             ToolCall(

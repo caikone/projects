@@ -121,7 +121,7 @@ class ContainerTest(unittest.TestCase):
             search_paths=[os.path.join(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__))), "config.ini")],
         )
-        self.assertEqual(len(container.tools.all()), 12)
+        self.assertEqual(len(container.tools.all()), 15)
         ctx = container.build_context(initial_prompt="hi")
         self.assertIsNotNone(ctx.session)
         self.assertIsNotNone(ctx.new_session)

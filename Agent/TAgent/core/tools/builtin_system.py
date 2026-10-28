@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import json
+
 from ..services.calendar import CalendarService
 from .base import ToolBuilder, int_param
 
@@ -37,7 +39,9 @@ def build_system_tools(calendar: CalendarService | None = None) -> list:
         try:
             year = int(raw)
         except (TypeError, ValueError):
-            return "参数 year 必须是整数，实际收到：%r" % (raw,)
+            # 用 ensure_ascii=False 展示，避免中文被转义成 \uXXXX
+            shown = json.dumps(raw, ensure_ascii=False, default=str)
+            return "参数 year 必须是整数，实际收到：%s" % shown
         return calendar.describe_leap_year(year)
 
     return builder.build()

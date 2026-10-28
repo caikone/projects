@@ -22,6 +22,7 @@ from ..domain.filesystem import (
     FileTypeInfo,
     MutationResult,
     TextFileContent,
+    quoted,
 )
 from ..errors import FileSystemError
 
@@ -233,7 +234,7 @@ class FileSystemService:
         if old_text:
             count = content.text.count(old_text)
             if count == 0:
-                raise FileSystemError("编辑失败：文件中没有找到要替换的文本：%r" % old_text)
+                raise FileSystemError("编辑失败：文件中没有找到要替换的文本：%s" % quoted(old_text))
             updated = content.text.replace(old_text, new_text)
             summary = EditSummary(
                 path=os.path.abspath(path),

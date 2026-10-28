@@ -9,8 +9,19 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Iterable
+
+
+def quoted(text: str) -> str:
+    """给文本加引号显示，同时**原样保留中文**。
+
+    用于把「被替换的文本」等参数渲染进结果/错误信息里：
+    既能像 `%r` 一样让换行、制表符可见（显示为 \\n、\\t），
+    又不会把中文转义成 `\\u4e2d\\u6587` 之类的编码。
+    """
+    return json.dumps(text, ensure_ascii=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +125,8 @@ class EditSummary:
 
     def render(self) -> str:
         if self.replaced:
-            action = "已把 %d 处 %r 替换为 %r" % (self.replaced, self.old_text, self.new_text)
+            action = "已把 %d 处 %s 替换为 %s" % (
+                self.replaced, quoted(self.old_text or ""), quoted(self.new_text))
         else:
             action = "已整体覆盖文件内容"
         return "%s：%s（保存编码：%s）" % (action, self.path, self.encoding)

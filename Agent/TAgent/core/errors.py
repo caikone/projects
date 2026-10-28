@@ -15,6 +15,7 @@
     │   ├── ToolArgumentError       参数不是合法 JSON 对象 / 缺少必填项
     │   └── FileSystemError         本地文件操作失败（业务语义）
     ├── FrontendError               界面加载失败（目录不存在 / 依赖缺失 / 未实现 Frontend）
+    ├── SearchError                 联网搜索错误（缺配置 / 网络失败 / API 返回错误 / 响应格式异常）
     └── LLMError                    大模型通信错误
         ├── LLMConnectionError      网络不可达
         ├── LLMTimeoutError         请求超时
@@ -110,6 +111,134 @@ class FileSystemError(ToolError):
     """本地文件操作失败（不存在 / 权限不足 / 类型不符 / 非纯文本等）。"""
 
     kind = "filesystem"
+
+
+# ==========================================================================
+# 联网搜索
+# ==========================================================================
+class SearchError(TAgentError):
+    """联网搜索过程中的错误：缺少配置、网络失败、API 返回错误、响应格式异常等。
+
+    工具护栏会把该异常转成 `ToolOutcome.failure`，
+    让模型能看到清晰的错误说明并据此答复用户。
+    """
+
+    kind = "search"
+
+
+# ==========================================================================
+# 网页抓取
+# ==========================================================================
+class WebFetchError(TAgentError):
+    """网页抓取过程中的所有错误的基类。
+
+    `fetchWeb` 工具处理失败时会转成 `ToolOutcome.failure`，
+    模型据此告知用户「抓取失败」而不是编造内容。
+    """
+
+    kind = "webfetch"
+
+
+class InvalidURLError(WebFetchError):
+    """URL 非法或不被支持（缺 scheme、scheme 不是 http/https 等）。"""
+
+    def __init__(self, url: str, reason: str = "") -> None:
+        message = "无法抓取 %s：URL %s" % (url, reason or "非法")
+        super().__init__(message, url=url)
+        self.url = url
+
+
+class WebFetchConnectionError(WebFetchError):
+    """底层抓取程序不可用，或目标主机不可达 / DNS 失败 / 连接被拒。"""
+
+    def __init__(self, message: str = "无法访问目标网页，请检查 URL 与网络。") -> None:
+        super().__init__(message)
+
+
+class WebFetchTimeoutError(WebFetchError):
+    """抓取超时。"""
+
+    def __init__(self, timeout: float | int, url: str = "") -> None:
+        message = "抓取超时（%s 秒），请检查网络或调大 [webfetch] timeout。" % timeout
+        if url:
+            message += " 目标：%s" % url
+        super().__init__(message, timeout=timeout, url=url)
+        self.timeout = timeout
+
+
+class WebFetchHTTPError(WebFetchError):
+    """目标服务器返回非 2xx 状态码。"""
+
+    def __init__(self, status_code: int, url: str = "") -> None:
+        message = "目标网页返回 HTTP %s" % status_code
+        if url:
+            message += "：%s" % url
+        super().__init__(message, status_code=status_code, url=url)
+        self.status_code = status_code
+
+
+class WebFetchParseError(WebFetchError):
+    """HTML 解析失败（trafilatura / lxml 提取过程出错）。"""
+
+    def __init__(self, message: str = "网页 HTML 解析失败，无法提取正文。") -> None:
+        super().__init__(message)
+
+
+class WebFetchEmptyError(WebFetchError):
+    """拿到了 HTTP 响应，但没能提取出正文（纯导航页 / JS 渲染页 / 反爬页等）。"""
+
+    def __init__(self, url: str = "", detail: str = "") -> None:
+        message = "未能从 %s 提取到正文内容" % (url or "目标网页")
+        if detail:
+            message += "（%s）" % detail
+        message += "：页面可能需要 JavaScript 渲染，或正文过短。"
+        super().__init__(message, url=url)
+        self.url = url
+
+
+# ==========================================================================
+# 本地命令行（CLI）
+# ==========================================================================
+class CliError(TAgentError):
+    """本地命令行执行过程中的所有错误的基类。
+
+    注意区分两类「不成功」：
+        - **工具失败**（程序不存在 / 无法启动）：转成 `ToolOutcome.failure`；
+        - **命令执行完了但退出码非 0**（如 `git status` 在非仓库目录）：
+          这不是工具故障，退出码与 stderr 必须原样交给模型判断，见
+          `services/cli.py::CommandService.render`。
+    """
+
+    kind = "cli"
+
+
+class CliNotFoundError(CliError):
+    """PATH 里找不到要执行的程序。"""
+
+    def __init__(self, command: str) -> None:
+        message = (
+            "找不到可执行程序：%s。请确认它已安装并加入 PATH，"
+            "或改用完整路径（如 C:\\Windows\\System32\\curl.exe）。" % command)
+        super().__init__(message, command=command)
+        self.command = command
+
+
+class CliArgumentError(CliError):
+    """命令名 / 参数不合法（空命令名、args 不是字符串数组等）。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class CliExecutionError(CliError):
+    """进程无法启动或被操作系统拒绝（权限不足、不是可执行文件等）。"""
+
+    def __init__(self, command: str = "", detail: str = "") -> None:
+        message = "无法启动程序 %s" % (command or "该命令")
+        if detail:
+            message += "：%s" % detail
+        super().__init__(message, command=command)
+        self.command = command
 
 
 # ==========================================================================

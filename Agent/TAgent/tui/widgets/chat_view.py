@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
@@ -19,6 +21,8 @@ class ChatView(VerticalScroll):
         super().__init__(**kwargs)
         self._streaming: MessageCard | None = None
         self._timer = None
+        #: 是否自动跟随到底部（用户往上翻看历史时暂停跟随，避免被强行拽回）
+        self._follow = True
 
     # ------------------------------------------------------------------
     def on_mount(self) -> None:
@@ -28,6 +32,15 @@ class ChatView(VerticalScroll):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        """滚动位置变化时更新「是否跟随底部」。
+
+        必须先调 `super()`：`ScrollView.watch_scroll_y` 负责刷滚动条位置并
+        重绘视口，覆盖掉它会导致「scroll_y 变了但屏幕不动」。
+        """
+        super().watch_scroll_y(old_value, new_value)
+        self._follow = self.is_vertical_scroll_end
 
     # ------------------------------------------------------------------
     # 消息写入
@@ -56,10 +69,18 @@ class ChatView(VerticalScroll):
         self._streaming.append(delta)  # type: ignore[union-attr]
 
     async def end_stream(self) -> None:
-        """结束流式消息（强制渲染一次）。"""
-        if self._streaming is None:
+        """结束流式消息（确保最终全文渲染完成）。"""
+        card = self._streaming
+        if card is None:
             return
-        self._streaming.flush(force=True)
+        # 定时器可能正在渲染同一张卡片（`_flushing=True` 时 flush 会立即返回）。
+        # 这里必须「等到真的渲染完」——否则最后一帧会丢掉收尾前到达的增量，
+        # 表现为回复停在某个标题后面、下面的内容永远不出现。
+        for _ in range(100):
+            await card.flush(force=True)
+            if not card.dirty and not card.flushing:
+                break
+            await asyncio.sleep(0.02)
         self._streaming = None
         self._after_change()
 
@@ -83,13 +104,31 @@ class ChatView(VerticalScroll):
     # 渲染节流
     # ------------------------------------------------------------------
     def flush(self) -> None:
-        """定时器回调：把脏卡片统一渲染一次并滚到底部。"""
+        """定时器回调：把脏卡片统一渲染一次并滚到底部。
+
+        `MessageCard.flush` 是协程（Markdown.update 的挂载必须被 await），
+        Textual 的 `set_interval` 支持异步回调，多个 tick 重入由卡片内的
+        `_flushing` 标志防抖。
+        """
+        return self._flush_all()
+
+    async def _flush_all(self) -> None:
         changed = False
         for card in self.query(MessageCard):
-            if card.flush():
+            if await card.flush():
                 changed = True
         if changed:
-            self.scroll_end(animate=False)
+            self._maybe_follow()
 
     def _after_change(self) -> None:
+        self._maybe_follow()
+
+    def _maybe_follow(self) -> None:
+        """内容增长时跟随到底部；用户正在往上翻看时不打扰。"""
+        if self._follow:
+            self.scroll_end(animate=False)
+
+    def stick_to_bottom(self) -> None:
+        """强制恢复跟随（用户按 Ctrl+End 或发送新消息时）。"""
+        self._follow = True
         self.scroll_end(animate=False)

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """OpenAI 兼容协议的 LLM 适配器（基于 requests + SSE）。
 
-这是**唯一** import `requests` 的地方（隔离第三方依赖），
-也是唯一把 HTTP 异常翻译为 `core.errors.LLMError` 的地方。
+这是 import `requests` 的基础设施适配器之一（另一个是
+`infrastructure/search/baidu_qianfan.py`），也是唯一把 HTTP 异常
+翻译为 `core.errors.LLMError` 的地方。
 核心服务因此完全不知道 HTTP 的存在。
 
 已验证兼容：OpenAI / DeepSeek / 通义千问兼容模式 / 本地 vLLM / Ollama(openai 兼容) 等。
@@ -69,7 +70,7 @@ class OpenAICompatibleClient(LLMClient):
 
         Raises:
             LLMTimeoutError / LLMConnectionError / LLMHTTPError: 网络与 HTTP 层错误。
-            LLMStreamError: 流内返回 error 对象。
+            LLMStreamError: 流内返回 error 对象，或流传输中途断开。
         """
         response = self._post(request)
         try:
@@ -103,6 +104,11 @@ class OpenAICompatibleClient(LLMClient):
                 chunk = self._to_chunk(obj)
                 if chunk is not None:
                     yield chunk
+        except requests.exceptions.RequestException as exc:
+            # 流式读取中途断网 / 服务端提前断开：requests 抛的不是 LLMError，
+            # 若不在这里翻译，会穿透 AgentService 的 `except LLMError`，
+            # 表现为「回复输出到一半突然没了，界面也没有任何错误提示」。
+            raise LLMStreamError("流式传输中断：%s" % exc) from exc
         finally:
             response.close()
 

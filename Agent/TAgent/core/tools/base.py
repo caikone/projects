@@ -104,4 +104,9 @@ def int_param(description: str) -> ParamSpec:
     return ParamSpec(type="integer", description=description)
 
 
-__all__ = ["ToolBuilder", "guard", "text_param", "int_param"]
+def string_array_param(description: str) -> ParamSpec:
+    """快捷构造字符串数组参数声明（如命令的参数列表）。"""
+    return ParamSpec(type="array", description=description, items={"type": "string"})
+
+
+__all__ = ["ToolBuilder", "guard", "text_param", "int_param", "string_array_param"]

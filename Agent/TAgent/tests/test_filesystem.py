@@ -74,6 +74,25 @@ class FileSystemServiceTest(unittest.TestCase):
         with self.assertRaises(FileSystemError):
             self.fs.edit_file(path, "x", old_text="不存在")
 
+    def test_edit_chinese_not_escaped(self) -> None:
+        """中文参数在结果/错误信息里必须原样显示，不能变成 \\uXXXX。"""
+        path = os.path.join(self.tmp, "cn.txt")
+        self.fs.create_file(self.tmp, "cn.txt", "今天天气很好")
+
+        summary = self.fs.edit_file(path, "今天天气真好", old_text="很好")
+        rendered = summary.render()
+        self.assertIn("很好", rendered)
+        self.assertIn("真好", rendered)
+        # 「很好」若被转义会变成 \u5f88\u597d
+        self.assertNotIn("\\u5f88", rendered)
+
+        with self.assertRaises(FileSystemError) as ctx:
+            self.fs.edit_file(path, "x", old_text="找不到的中文")
+        message = str(ctx.exception)
+        self.assertIn("找不到的中文", message)
+        # 「找」若被转义会变成 \u627e
+        self.assertNotIn("\\u627e", message)
+
     def test_delete_file_and_directory(self) -> None:
         d = os.path.join(self.tmp, "del")
         self.fs.create_directory(d)

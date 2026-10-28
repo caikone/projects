@@ -194,6 +194,36 @@ ToolPanel .panel-title {
     padding: 0 1;
 }
 
+/* ---------------- 输入框前方的思考提示条 ---------------- */
+ThinkingBar {
+    height: 1;
+    background: $tui_surface;
+    color: $tui_muted;
+    padding: 0 1;
+}
+
+ThinkingBar.-idle Spinner,
+ThinkingBar Spinner.-stopped {
+    display: none;
+}
+
+Spinner {
+    width: auto;
+    color: $tui_accent;
+    padding: 0 1 0 0;
+}
+
+ThinkingBar .hint-idle {
+    width: 1fr;
+    color: $tui_muted;
+}
+
+ThinkingBar .hint-busy {
+    width: 1fr;
+    color: $tui_accent;
+    text-style: bold;
+}
+
 /* ---------------- 输入区 ---------------- */
 ChatInput {
     /* 同理：height 含上边框，这里给足 6 行可编辑区 */

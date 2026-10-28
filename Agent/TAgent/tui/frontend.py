@@ -13,6 +13,7 @@ import sys
 from core.ports.frontend import Frontend, FrontendContext
 
 from .app import TAgentApp
+from .console_utf8 import restore_factory
 
 
 class TuiFrontend(Frontend):
@@ -28,8 +29,15 @@ class TuiFrontend(Frontend):
             print("当前环境没有可用的交互式终端，无法启动 TUI。", file=sys.stderr)
             return 2
 
-        app = TAgentApp(ctx)
-        app.run()
+        # Windows 上把控制台切成 UTF-8，避免中文被代码页吞成 `?` 或字面转义；
+        # 退出时必定恢复用户的原始代码页。
+        restore = restore_factory()
+        try:
+            app = TAgentApp(ctx)
+            app.run()
+        finally:
+            if restore is not None:
+                restore()
         return 0
 
     def shutdown(self) -> None:

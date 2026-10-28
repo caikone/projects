@@ -23,18 +23,20 @@ from core.domain.events import (
 
 
 class AgentEventBridge:
-    """把 Agent 事件流驱动到 TUI 的三个视图组件上。
+    """把 Agent 事件流驱动到 TUI 的四个视图组件上。
 
     Args:
-        chat:   对话视图。
-        tools:  工具活动面板。
-        status: 状态栏。
+        chat:     对话视图。
+        tools:    工具活动面板。
+        status:   顶部状态栏。
+        thinking: 输入框前方的「思考中」提示条（可选，便于单组件测试）。
     """
 
-    def __init__(self, chat, tools, status) -> None:
+    def __init__(self, chat, tools, status, thinking=None) -> None:
         self.chat = chat
         self.tools = tools
         self.status = status
+        self.thinking = thinking
         self._turns = 0
         self._tool_calls = 0
 
@@ -62,13 +64,19 @@ class AgentEventBridge:
     async def _on_turn_started(self, event: TurnStarted) -> None:
         await self.chat.add_message("你", event.user_text, kind="user")
         self.status.set_state("等待响应…", "thinking")
+        if self.thinking is not None:
+            self.thinking.set_busy("等待响应…")
 
     async def _on_text_delta(self, event: AssistantTextDelta) -> None:
         self.status.set_state("生成中…", "thinking")
+        if self.thinking is not None:
+            self.thinking.set_busy("生成中…")
         await self.chat.stream_text(event.text)
 
     async def _on_tool_started(self, event: ToolCallStarted) -> None:
         self.status.set_state("调用工具 %s" % event.name, "tool")
+        if self.thinking is not None:
+            self.thinking.set_busy("调用工具 %s…" % event.name)
         await self.tools.add_call(
             call_id=event.call_id,
             name=event.name,
@@ -95,6 +103,8 @@ class AgentEventBridge:
 
     async def _on_error(self, event: ErrorOccurred) -> None:
         self.status.set_state("出错：%s" % event.message[:40], "error")
+        if self.thinking is not None:
+            self.thinking.set_label("出错：%s" % event.message[:24])
         await self.chat.add_error(event.message)
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
@@ -105,3 +115,5 @@ class AgentEventBridge:
             self.status.set_state("已中止", "idle")
         else:
             self.status.set_state("空闲", "idle")
+        if self.thinking is not None:
+            self.thinking.set_label("收尾中…")

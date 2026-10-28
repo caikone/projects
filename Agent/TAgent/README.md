@@ -32,13 +32,32 @@ TUI 快捷键：
 
 | 按键 | 作用 |
 |---|---|
-| `Enter` | 发送 |
-| `Shift+Enter` | 换行 |
+| `Enter` | 智能回车：**单行直接发送**；多行时换行，末行是空行再按 Enter 发送 |
+| `Ctrl+J` | 强制换行（任何终端都可用） |
+| `Shift+Enter` | 换行（终端能上报 Shift 时有效；见下方说明） |
+| `Ctrl+S` | 强制发送（多行也不用等空行） |
 | `Ctrl+X` | 中止本轮生成 |
 | `Ctrl+N` | 开新会话 |
 | `Ctrl+T` | 显示/隐藏工具面板 |
 | `Ctrl+K` | 清空工具面板 |
+| `PageUp` / `PageDown` | 对话区上翻 / 下翻一页（输入框有焦点时也生效） |
+| `Ctrl+End` | 跳回最新内容（恢复到自动跟随底部） |
 | `Ctrl+Q` | 退出 |
+
+> **关于 Shift+Enter**：Textual 在 Windows 上通过 `ReadConsoleInputW` 读键，
+> 只读 `uChar.UnicodeChar`、**丢弃 `dwControlKeyState` 里的 Shift 状态**，
+> 因此 Windows 终端里的 Shift+Enter 到达应用时就是一个普通 Enter。
+
+> **关于滚动**：对话区可以用鼠标滚轮或 `PageUp` / `PageDown` 滚动。
+> 生成过程中视图会自动跟随到底部；一旦你往上翻看历史，跟随会自动暂停，
+> 不会被新内容拽回底部，按 `Ctrl+End` 或发送新消息即可恢复跟随。
+> 这就是为什么换行不能只依赖 Shift+Enter：本实现额外提供了
+> `Ctrl+J`（换行）与 `Ctrl+S`（发送），两者都只用控制字符，任何终端都能识别，
+> 并且输入框上方会常驻一行按键提示，随时能看到当前是该用哪个键。
+
+粘贴多行文本会原样进入输入框（`\r\n` 会自动归一化为 `\n`），不会误触发送。
+
+等待模型回复时，输入框上方会显示**转圈动画**和当前状态（等待响应 / 生成中 / 调用工具 xxx）。
 
 配置（`config.ini`，也支持 `TAGENT_BASE_URL` / `TAGENT_API_KEY` / `TAGENT_MODEL` 环境变量覆盖）：
 
@@ -65,18 +84,23 @@ TAgent/
 │   ├── container.py           #   组合根：唯一负责把对象拼起来的地方
 │   ├── frontend_registry.py   #   界面自动发现与注册
 │   ├── config/                #   配置层：models（数据模型）+ loader（加载策略）
-│   ├── domain/                #   领域层：messages / events / filesystem 值对象
-│   ├── ports/                 #   端口层：LLM、工具、前端 的抽象契约（依赖倒置）
-│   ├── services/              #   服务层：filesystem / calendar / session / agent / tool_executor
+│   ├── domain/                #   领域层：messages / events / filesystem / webpage / cli 值对象
+│   ├── ports/                 #   端口层：LLM、工具、前端、网页抓取、命令执行 的抽象契约（依赖倒置）
+│   ├── services/              #   服务层：filesystem / calendar / webfetch / cli / session / agent / tool_executor
 │   ├── tools/                 #   工具层：把领域服务包装成 LLM 可调用的 function
-│   └── infrastructure/        #   基础设施：llm/openai_compat（唯一 import requests 的地方）
+│   └── infrastructure/        #   基础设施：llm/openai_compat（唯一 import requests 的地方）、
+│                              #              webpage/curl_trafilatura（curl + trafilatura）、
+│                              #              cli/local_subprocess（唯一 import subprocess 跑命令的地方）
 │
 ├── tui/                       # ===== TUI 界面（Textual）=====
 │   ├── frontend.py            #   Frontend 实现 —— core 认识它的唯一入口
 │   ├── app.py                 #   App：布局 + 键盘 + 线程调度，无业务逻辑
 │   ├── bridge.py              #   防腐层：core 事件 → 界面动作
 │   ├── styles.tcss            #   样式（换主题只改这个文件）
-│   └── widgets/               #   chat_view / message_card / tool_panel / status_bar / input_box
+│   ├── text_utils.py          #   终端输入清洗（字面 \\uXXXX 转义还原、换行归一化）
+│   ├── console_utf8.py        #   Windows 控制台 UTF-8 代码页切换与还原
+│   └── widgets/               #   chat_view / message_card / tool_panel /
+│                              #   status_bar / input_box / thinking_bar
 │
 ├── web/  desktop/  mobile/  frontend/   # 预留：未来界面与前端工程（见各自 README）
 ├── tests/                     # core 与 tui 的测试
@@ -176,12 +200,15 @@ flowchart TD
 
 ---
 
-## 内置工具（12 个，与原脚本一致）
+## 内置工具（15 个）
 
 | 工具 | 说明 | 实现位置 |
 |---|---|---|
 | `getDate` | 当前日期时间（调系统 `date`，失败回退 Python） | `services/calendar.py` |
 | `isLeapYear` | 闰年判断 | `services/calendar.py` |
+| `searchwdb` | 联网搜索（百度千帆智能搜索生成 API，返回摘要 + 参考来源） | `services/websearch.py` |
+| `fetchWeb` | 抓取网页正文转 Markdown（curl + trafilatura，去导航/广告/页脚） | `services/webfetch.py` |
+| `RunCli` | 执行本机已安装的命令行程序，返回 stdout / stderr / 退出码 | `services/cli.py` |
 | `getCurrentDirectory` | 当前工作目录 | `services/filesystem.py` |
 | `listDirectory` | 列举目录一层条目 | 同上 |
 | `getFileType` | 按扩展名推断 MIME / 类别 / 大小 | 同上 |
@@ -189,6 +216,66 @@ flowchart TD
 | `createFile` | 建文件（自动建目录，不覆盖） | 同上 |
 | `editFile` | 替换或整体覆盖，保持原编码 | 同上 |
 | `createDirectory` / `deleteDirectory` / `deleteFile` / `renameItem` | 目录与文件变更 | 同上 |
+
+### fetchWeb 抓取工具
+
+调用本地 `curl`（参数列表方式，**不用 `shell=True`**）拉取 HTML，
+再用 `trafilatura` 提取正文并转 Markdown，保留标题 / 段落 / 列表 / 表格 / 链接，
+去掉导航、广告、页脚。结果带 `【来源】` 脚注与「HTML→正文」压缩比，
+正文默认截断到 20000 字符以控制 Token 消耗。
+
+**多策略级联提取**：trafilatura 默认参数偏「精度优先」，在国内高校 / 政企 CMS
+的 table 布局 + 图片正文页面上会把整篇正文判空（实测某高校新闻页 0 字符）。
+因此按「默认 → `favor_recall` → `favor_recall`+评论」逐级放宽，
+取最长结果，拿到足够长的正文即提前停止；全部失败才算解析失败。
+
+失败时给出语义明确的错误（`core/errors.py` 的 `WebFetchError` 子类）：
+非法 URL / curl 不存在 / 超时 / 主机不可达 / HTTP 4xx 5xx / HTML 解析失败 / 正文过短。
+
+> `trafilatura` 需要额外安装：`pip install trafilatura`（已加入 `requirements.txt`）。
+
+### RunCli 命令行工具
+
+让 Agent 调用本机**任意已安装**的命令行程序，并把「标准输出 / 标准错误 / 退出码 /
+耗时」原样交回模型，由模型判断结果并决定下一步（改参数重试 / 换命令 / 向用户说明）。
+
+```jsonc
+// 模型实际发出的调用
+{ "command": "git", "args": ["status", "--short"] }
+```
+
+```text
+// 回传给模型的文本
+$ git status --short
+
+退出码：0（耗时 47 ms）
+
+【stdout】
+ M README.md
+?? core/domain/cli.py
+
+【stderr】
+（无）
+```
+
+设计要点：
+
+| 关注点 | 做法 |
+|---|---|
+| 执行方式 | 程序名与参数拼成**列表**，`subprocess.run(argv, shell=False)`，绝不拼接 shell 字符串 |
+| 注入安全 | 不经 shell 解释，`&` `\|` `>` 空格等都被当作普通字符（有回归测试覆盖） |
+| 卡死防护 | `stdin` 接 `DEVNULL`，避免程序等交互输入把 Agent 挂起 |
+| 超时 | 默认 30 秒（`LocalSubprocessRunner(timeout=...)`），超时即终止 |
+| 超时后仍可用 | 保留终止前已产生的**部分输出**，并标注「执行超时已被终止」，便于模型排查 |
+| 输出截断 | stdout ≤ 8000 字符、stderr ≤ 4000 字符；截断时**保留开头与结尾**（关键信息常在末尾），中间用 `…（已省略 N 字符）…` 标注 |
+| 编码 | 解码顺序 utf-8 → gb18030（Windows 中文终端）→ latin-1 |
+| 退出码语义 | 非 0 **不是**工具故障，原样呈现让模型结合 stderr 判断；只有「程序不存在 / 无法启动」才算工具失败 |
+| 参数校验 | `args` 必须是字符串数组；收到字符串直接报错（若偷偷 `shlex.split` 就退化成 shell 语义） |
+
+> **安全边界（重要）**：本阶段教学目标是让学生看清「Agent 调用本地工具」的完整链路，
+> 因此**暂未实现**命令白名单 / 黑名单 / 人工审批——命令以**运行 TAgent 的当前用户权限**
+> 直接执行。请仅在受控的教学实验环境中使用；护栏（白名单 + 危险命令拦截 + 审批）
+> 属于下一阶段的扩展点，加在 `CommandService.validate()` 一处即可对全系统生效。
 
 **新增一个工具**只需两步（不改任何已有文件）：
 
@@ -240,9 +327,12 @@ def _copy_file(args: dict) -> str:
 ## 测试
 
 ```bash
-python tests/test_filesystem.py   # 文件系统服务（12 用例）
-python tests/test_agent.py        # Agent 全链路 + 容器装配（6 用例，离线）
-python tests/test_tui.py          # TUI 无头冒烟（4 用例，Textual run_test）
+python tests/test_filesystem.py          # 文件系统服务（13 用例）
+python tests/test_agent.py               # Agent 全链路 + 容器装配（6 用例，离线）
+python tests/test_frontend_registry.py   # 界面发现与诊断（6 用例，含「依赖缺失不能被吞」回归）
+python tests/test_text_utils.py          # 输入文本清洗（11 用例，纯函数）
+python tests/test_webfetch.py            # 网页抓取（14 用例：URL 校验/渲染/异常映射，联网冒烟可自动跳过）
+python tests/test_tui.py                 # TUI 无头冒烟（14 用例，Textual run_test）
 ```
 
 `tests/test_agent.py` 用脚本化 LLM 客户端跑通「流式输出 + 工具调用 + 上下文回灌 + 轮次上限」
