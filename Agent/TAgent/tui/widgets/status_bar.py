@@ -20,11 +20,12 @@ class StatusBar(Horizontal):
     """顶部状态条。"""
 
     def __init__(self, model: str = "", tool_count: int = 0,
-                 config_source: str = "", **kwargs) -> None:
+                 config_source: str = "", skills: str = "", **kwargs) -> None:
         super().__init__(**kwargs)
         self._model = model
         self._tool_count = tool_count
         self._config_source = config_source
+        self._skills = skills
         self._state_text = "空闲"
         self._state_key = "idle"
         self._turns = 0
@@ -49,6 +50,8 @@ class StatusBar(Horizontal):
         text = "模型 %s" % self._model if self._model else "模型 未配置"
         if self._tool_count:
             text += "  ·  %d 个工具" % self._tool_count
+        if self._skills:
+            text += "  ·  %s" % self._skills
         return text
 
     def _stat_text(self) -> str:

@@ -84,13 +84,19 @@ TAgent/
 │   ├── container.py           #   组合根：唯一负责把对象拼起来的地方
 │   ├── frontend_registry.py   #   界面自动发现与注册
 │   ├── config/                #   配置层：models（数据模型）+ loader（加载策略）
-│   ├── domain/                #   领域层：messages / events / filesystem / webpage / cli 值对象
-│   ├── ports/                 #   端口层：LLM、工具、前端、网页抓取、命令执行 的抽象契约（依赖倒置）
-│   ├── services/              #   服务层：filesystem / calendar / webfetch / cli / session / agent / tool_executor
+│   ├── domain/                #   领域层：messages / events / filesystem / webpage / cli / skills 值对象
+│   │                          #            frontmatter（SKILL.md 的解析与合成，纯文本逻辑）
+│   ├── ports/                 #   端口层：LLM、工具、前端、网页抓取、命令执行、Skill 的抽象契约（依赖倒置）
+│   ├── services/              #   服务层：filesystem / calendar / webfetch / cli / skills /
+│   │                          #            session / agent / tool_executor
 │   ├── tools/                 #   工具层：把领域服务包装成 LLM 可调用的 function
 │   └── infrastructure/        #   基础设施：llm/openai_compat（唯一 import requests 的地方）、
 │                              #              webpage/curl_trafilatura（curl + trafilatura）、
-│                              #              cli/local_subprocess（唯一 import subprocess 跑命令的地方）
+│                              #              cli/local_subprocess（唯一 import subprocess 跑命令的地方）、
+│                              #              skills/local_directory（唯一知道 Skill 磁盘布局的地方）
+│
+├── .agents/skills/            # ===== Agent Skills：每个子目录一个 Skill =====
+│   └── demo-hello/SKILL.md    #   示例技能（可删）
 │
 ├── tui/                       # ===== TUI 界面（Textual）=====
 │   ├── frontend.py            #   Frontend 实现 —— core 认识它的唯一入口
@@ -200,7 +206,7 @@ flowchart TD
 
 ---
 
-## 内置工具（15 个）
+## 内置工具（17 个）
 
 | 工具 | 说明 | 实现位置 |
 |---|---|---|
@@ -209,6 +215,8 @@ flowchart TD
 | `searchwdb` | 联网搜索（百度千帆智能搜索生成 API，返回摘要 + 参考来源） | `services/websearch.py` |
 | `fetchWeb` | 抓取网页正文转 Markdown（curl + trafilatura，去导航/广告/页脚） | `services/webfetch.py` |
 | `RunCli` | 执行本机已安装的命令行程序，返回 stdout / stderr / 退出码 | `services/cli.py` |
+| `LoadSkill` | 按需加载 Skill 的完整说明或附加文件（动态加载） | `services/skills.py` |
+| `createSkill` | 按用户要求创建新 Skill（生成规范的 `SKILL.md`，绝不覆盖） | `services/skills.py` |
 | `getCurrentDirectory` | 当前工作目录 | `services/filesystem.py` |
 | `listDirectory` | 列举目录一层条目 | 同上 |
 | `getFileType` | 按扩展名推断 MIME / 类别 / 大小 | 同上 |
@@ -276,6 +284,91 @@ $ git status --short
 > 因此**暂未实现**命令白名单 / 黑名单 / 人工审批——命令以**运行 TAgent 的当前用户权限**
 > 直接执行。请仅在受控的教学实验环境中使用；护栏（白名单 + 危险命令拦截 + 审批）
 > 属于下一阶段的扩展点，加在 `CommandService.validate()` 一处即可对全系统生效。
+
+### Agent Skills：LoadSkill 动态加载 与 createSkill 创建
+
+遵循 Agent Skills 规范：**Skill 的正文只有在模型决定要用时才进入上下文**。
+
+```
+<项目根>/.agents/skills/          ← 项目根 = 程序启动时的工作目录
+    demo-hello/
+        SKILL.md                  ← 入口，开头是 YAML Frontmatter
+    code-review/
+        SKILL.md
+        scripts/lint.py           ← 附加文件（按需加载）
+```
+
+`SKILL.md` 的开头必须声明 `name` 与 `description` 两个字段：
+
+```markdown
+---
+name: code-review
+description: 审查 Python 代码风格与常见缺陷，并给出逐条修改建议。
+---
+
+# code-review
+…完整指令…
+```
+
+**初始化阶段**只扫描出 `name` + `description`（正文一个字节都不读），
+整理成清单追加到 System Prompt 末尾：
+
+```
+You have access to the following skills:
+- 'code-review': 审查 Python 代码风格与常见缺陷，并给出逐条修改建议。
+- 'demo-hello': 演示 Skill 的写法与按需加载用法。
+Use the 'LoadSkill' tool to load the full instructions of a skill when needed.
+You can also load additional files referenced by a skill.
+```
+
+**运行时**由模型自己决定要不要深挖，调用 `LoadSkill`：
+
+```jsonc
+{ "name": "code-review" }                          // 加载 SKILL.md 全文
+{ "name": "code-review", "filename": "scripts/lint.py" }   // 只加载附加文件
+```
+
+| 关注点 | 做法 |
+|---|---|
+| 目录基准 | 项目根 = **程序启动时的工作目录**；可用 `config.ini` 的 `skills_dir` 覆盖 |
+| 懒加载 | 发现阶段只读 Frontmatter（先扫 8KB，命中即止），正文永不进上下文 |
+| 路径兼容 | `filename` 支持相对 Skill 目录、项目相对、绝对路径；只给文件名时**在该 Skill 目录内递归查找** |
+| 歧义处理 | 同名文件有多个时返回候选路径列表，由模型指定更精确的路径重试 |
+| 越界防护 | 读取范围**锁定在 Skill 目录内部**；`..` 穿越与目录外绝对路径一律拒绝 |
+| 坏 Skill 不炸 | 缺 `SKILL.md`、Frontmatter 少字段、重名 → 记进 `SkillCatalog.issues` 后跳过，不影响其它技能 |
+| YAML 依赖 | 装了 PyYAML 就用它；没装则用内置最小解析器（`key: value` + `|`/`>` 块标量），零依赖可跑 |
+
+#### 让模型自己创建 Skill：`createSkill`
+
+用户说「帮我把这个流程固化成技能」时，模型调用：
+
+```jsonc
+{
+  "name": "code-review",
+  "skillContext": "---\nname: code-review\ndescription: 审查代码改动并给出改进建议\n---\n\n# 步骤\n1. 先看 git diff\n2. 检查空指针与异常分支"
+}
+```
+
+| 关注点 | 做法 |
+|---|---|
+| 目录位置 | `<项目根>/.agents/skills/<name>/SKILL.md`（项目根 = 启动时的工作目录） |
+| 名称规范 | 归一化为小写字母 / 数字 / 连字符（`Code Review` → `code-review`）；纯中文名**直接报错**并提示改用英文名 |
+| Frontmatter | 无论模型写没写、写对没写对，最终都由服务层重写成规范格式，`name` 强制与目录名一致 |
+| description | 缺省时从正文首行自动提炼——否则发现阶段会把它判为无效技能 |
+| 绝不覆盖 | 目标 `SKILL.md` 已存在 → 明确报错、一个字节都不写；写入用 `x` 模式，并发调用也只有一方成功 |
+| 目录复用 | 目录已存在但没有入口文件（例如模型先建好了 `references/`）→ 复用该目录 |
+| 后续文件 | `references/`、`scripts/` 等由模型继续调用 `createFile` / `createDirectory` 完成 |
+
+创建成功后清单立即刷新，**同一轮对话里**就能用 `LoadSkill` 加载它；
+System Prompt 中的技能列表要等下次启动 / 新会话才会出现。
+
+> Skill 与其它工具是**平级协作**关系：`LoadSkill` 只是注册在同一个
+> `ToolRegistry` 里的一个普通工具，读到的指令里可以直接让模型去调 `RunCli`、
+> `createFile`、`fetchWeb` 等任何已有工具，既有工作流程一行都没改。
+
+仓库里附带了一个示例技能 `.agents/skills/demo-hello/`，确认机制可用后可整个删除。
+
+---
 
 **新增一个工具**只需两步（不改任何已有文件）：
 

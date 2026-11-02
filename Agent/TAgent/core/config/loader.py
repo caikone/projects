@@ -27,6 +27,8 @@ SECTION_AGENT = "agent"
 SECTION_SEARCH = "search"
 
 _INT_FIELDS = {"max_tool_rounds", "max_read_bytes", "max_tool_display_len", "history_limit"}
+#: 直接按字符串取用的 [agent] 配置项
+_STR_FIELDS = {"system_prompt", "skills_dir"}
 
 
 def _first_existing(paths: Iterable[str]) -> str | None:
@@ -109,7 +111,7 @@ def _agent_overrides(parser: configparser.ConfigParser) -> dict[str, object]:
                 raise ConfigError("[%s] 段的 %s 必须是整数，实际为：%s" % (SECTION_AGENT, key, raw))
         elif key == "enable_system_prompt":
             overrides[key] = raw.lower() in ("1", "true", "yes", "on")
-        elif key == "system_prompt":
+        elif key in _STR_FIELDS:
             overrides[key] = raw
     return overrides
 

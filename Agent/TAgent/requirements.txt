@@ -6,3 +6,7 @@
 requests>=2.31.0
 textual>=8.0.0
 trafilatura>=2.0.0
+
+# 可选：装上后用 PyYAML 解析 SKILL.md 的 YAML Frontmatter；
+# 不装也能跑——内置了最小解析器（key: value + | / > 块标量）
+# pyyaml>=6.0

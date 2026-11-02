@@ -92,6 +92,8 @@ class AgentSettings:
     enable_system_prompt: bool = True
     #: 会话历史最多保留的消息条数（0 表示不限制）
     history_limit: int = 0
+    #: Skill 根目录；留空则使用「启动时工作目录/.agents/skills」
+    skills_dir: str = ""
 
     def with_overrides(self, **changes: object) -> "AgentSettings":
         """返回一份改过若干字段的新配置（保持不可变语义）。"""

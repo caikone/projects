@@ -13,7 +13,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Iterable
 
 from .config.loader import load_settings
@@ -21,6 +22,7 @@ from .config.models import AgentSettings
 from .infrastructure.cli.local_subprocess import LocalSubprocessRunner
 from .infrastructure.llm.openai_compat import OpenAICompatibleClient
 from .infrastructure.search.baidu_qianfan import BaiduQianfanSearchClient
+from .infrastructure.skills.local_directory import LocalDirectorySkillStore
 from .infrastructure.webpage.curl_trafilatura import CurlTrafilaturaFetcher
 from .ports.frontend import FrontendContext
 from .ports.llm import LLMClient
@@ -30,11 +32,13 @@ from .services.calendar import CalendarService
 from .services.cli import CommandService
 from .services.filesystem import FileSystemService
 from .services.session import Session
+from .services.skills import SkillService
 from .services.webfetch import WebFetchService
 from .services.websearch import WebSearchService
 from .tools.builtin_cli import build_cli_tools
 from .tools.builtin_files import build_file_tools
 from .tools.builtin_search import build_search_tools
+from .tools.builtin_skills import build_skill_tools
 from .tools.builtin_system import build_system_tools
 from .tools.builtin_webfetch import build_webfetch_tools
 from .tools.registry import InMemoryToolRegistry
@@ -48,6 +52,8 @@ class AppContainer:
     llm: LLMClient
     tools: ToolRegistry
     agent: AgentService
+    #: Skill 服务（发现与按需加载；UI 可据此展示技能数量）
+    skills: SkillService = field(default_factory=lambda: _empty_skill_service())
     #: 实际生效的配置文件路径（UI 状态栏展示用）
     config_source: str = ""
 
@@ -88,11 +94,27 @@ class AppContainer:
         registry.register_many(build_webfetch_tools(webfetch))
         registry.register_many(build_cli_tools(cli))
 
+        # ---- Agent Skills -------------------------------------------
+        # 项目根目录 = 程序启动时的工作目录（规范要求）
+        project_root = os.getcwd()
+        skills = SkillService(
+            LocalDirectorySkillStore(
+                root=settings.skills_dir or None,
+                project_root=project_root,
+                max_read_bytes=settings.max_read_bytes,
+            )
+        )
+        registry.register_many(build_skill_tools(skills))
+        # 只在确实有技能时才注入清单，避免向模型宣传用不上的工具
+        if settings.enable_system_prompt:
+            settings = settings.with_overrides(
+                system_prompt=skills.compose_system_prompt(settings.system_prompt))
+
         client = llm or OpenAICompatibleClient(settings.llm)
         agent = AgentService(llm=client, tools=registry, settings=settings)
 
         return cls(settings=settings, llm=client, tools=registry,
-                   agent=agent, config_source=used)
+                   agent=agent, skills=skills, config_source=used)
 
     # ------------------------------------------------------------------
     # 产出
@@ -113,11 +135,20 @@ class AppContainer:
             tools=self.tools,
             initial_prompt=initial_prompt,
             new_session=self.new_session,
-            metadata={"config_source": self.config_source},
+            metadata={
+                "config_source": self.config_source,
+                # 没放 Skill 的项目不必在状态栏多显示一段
+                "skills": self.skills.describe() if self.skills.has_skills else "",
+            },
         )
 
     def close(self) -> None:
         self.agent.close()
+
+
+def _empty_skill_service() -> SkillService:
+    """默认的 Skill 服务（未显式装配时使用，指向启动时工作目录）。"""
+    return SkillService(LocalDirectorySkillStore())
 
 
 __all__ = ["AppContainer"]

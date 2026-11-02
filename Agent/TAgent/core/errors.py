@@ -197,6 +197,113 @@ class WebFetchEmptyError(WebFetchError):
 
 
 # ==========================================================================
+# Agent Skills
+# ==========================================================================
+class SkillError(TAgentError):
+    """Skill 发现 / 加载过程中的所有错误的基类。
+
+    与 `CliError` 同理：这些异常会被工具护栏转成 `ToolOutcome.failure`，
+    让模型看到「为什么没拿到」并自行决策（换名字 / 换路径 / 向用户说明），
+    而不是让整轮会话崩掉。
+    """
+
+    kind = "skill"
+
+
+class SkillNotFoundError(SkillError):
+    """模型请求的 Skill 名称不存在。"""
+
+    def __init__(self, name: str, available: "list[str] | None" = None) -> None:
+        message = "未找到名为「%s」的 Skill。" % name
+        if available:
+            message += "当前可用：%s。" % "、".join(available)
+        else:
+            message += "当前项目没有已发现的 Skill（检查 .agents\\skills\\ 目录）。"
+        super().__init__(message, name=name, available=available or [])
+        self.name = name
+        self.available = list(available or [])
+
+
+class SkillArgumentError(SkillError):
+    """调用参数不合法（缺 name、name 为空等）。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class SkillAlreadyExistsError(SkillError):
+    """目标 Skill 已存在（createSkill 绝不覆盖）。"""
+
+    def __init__(self, name: str, directory: str = "", entry: str = "") -> None:
+        message = "Skill「%s」已存在，本次未做任何改动，以免覆盖原有内容。" % name
+        if entry:
+            message += "现有入口：%s。" % entry
+        elif directory:
+            message += "现有目录：%s。" % directory
+        message += (
+            "如需修改它，请先 readFile 读取该 SKILL.md，再用 editFile 修改；"
+            "确需重建请先删除该 Skill 目录，或换一个新的名称。"
+        )
+        super().__init__(message, name=name, directory=directory, entry=entry)
+        self.name = name
+        self.directory = directory
+        self.entry = entry
+
+
+class SkillFileNotFoundError(SkillError):
+    """Skill 目录内找不到指定文件。"""
+
+    def __init__(self, skill: str, filename: str) -> None:
+        super().__init__(
+            "Skill「%s」内找不到文件：%s。可只传 name 加载 SKILL.md，"
+            "或先加载 SKILL.md 查看它引用了哪些附加文件。" % (skill, filename),
+            skill=skill,
+            filename=filename,
+        )
+        self.skill = skill
+        self.filename = filename
+
+
+class SkillAmbiguousFileError(SkillError):
+    """同名文件有多个候选，需要模型指定更精确的路径。"""
+
+    def __init__(self, skill: str, filename: str, candidates: "list[str]") -> None:
+        listed = "\n".join("  - %s" % c for c in candidates)
+        super().__init__(
+            "Skill「%s」内有 %d 个同名文件，无法确定要读哪一个：\n%s\n"
+            "请用更精确的相对路径（相对 Skill 目录）重试。"
+            % (skill, len(candidates), listed),
+            skill=skill,
+            filename=filename,
+            candidates=candidates,
+        )
+        self.skill = skill
+        self.filename = filename
+        self.candidates = list(candidates)
+
+
+class SkillPathError(SkillError):
+    """解析后的路径逃出了 Skill 目录（越界读取被拒绝）。"""
+
+    def __init__(self, skill: str, path: str) -> None:
+        super().__init__(
+            "拒绝读取：%s 解析后不在 Skill「%s」的目录内。"
+            "LoadSkill 只能读取该 Skill 目录内部的文件。" % (path, skill),
+            skill=skill,
+            path=path,
+        )
+        self.skill = skill
+        self.path = path
+
+
+class SkillFileError(SkillError):
+    """文件存在但读不了（疑似二进制 / 无法解码 / 权限不足）。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+# ==========================================================================
 # 本地命令行（CLI）
 # ==========================================================================
 class CliError(TAgentError):

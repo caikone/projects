@@ -60,6 +60,8 @@ class TAgentApp(App[None]):
         self._multiline_input = False
         # 供界面展示的元信息
         self.config_source = str(ctx.metadata.get("config_source", ""))
+        #: 已发现 Skill 的一句话摘要（状态栏展示用）
+        self.skills_summary = str(ctx.metadata.get("skills", ""))
 
     # ==================================================================
     # 布局
@@ -70,6 +72,7 @@ class TAgentApp(App[None]):
             model=self.ctx.settings.llm.model,
             tool_count=len(self.ctx.tools.all()),
             config_source=self.config_source,
+            skills=self.skills_summary,
             id="status",
         )
         with Horizontal(id="body"):
