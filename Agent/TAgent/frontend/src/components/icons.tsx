@@ -51,6 +51,13 @@ export const IconSpark = ({ size = 16, className }: IconProps) => (
   </svg>
 );
 
+export const IconShield = ({ size = 16, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <path d="M12 3.2l7 2.9v5.4c0 4.2-2.9 7.6-7 9.3-4.1-1.7-7-5.1-7-9.3V6.1l7-2.9Z" />
+    <path d="m9.3 12.1 1.9 1.9 3.6-3.8" />
+  </svg>
+);
+
 export const IconChevron = ({ size = 14, className }: IconProps) => (
   <svg {...base(size)} className={className}>
     <path d="m9 6 6 6-6 6" />

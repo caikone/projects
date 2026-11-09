@@ -44,6 +44,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from core.domain.events import AgentEvent, TurnCompleted
+from core.domain.agents import looks_like_agents_message
 from core.domain.messages import ChatMessage, Role
 from core.domain.mcp import McpSnapshot
 from core.errors import TAgentError
@@ -216,7 +217,15 @@ class WebState:
 
     def session_payload(self) -> dict[str, Any]:
         session = self.session
-        visible = [m for m in session.messages if m.role is not Role.SYSTEM]
+        filename = self.ctx.settings.agents_doc.filename
+        # system 提示词与 AGENTS.md 注入都属于「内部约定」：
+        # 前者是角色设定，后者是一条伪装的 user 消息，都不该出现在对话区。
+        visible = [
+            m for m in session.messages
+            if m.role is not Role.SYSTEM
+            and not (m.role is Role.USER
+                     and looks_like_agents_message(m.content or "", filename))
+        ]
         return {
             "id": session.id,
             "title": session.title,
@@ -480,7 +489,7 @@ async def _fallback_page(_: Request) -> Response:
 
 _FALLBACK_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<title>TAgent · Web 界面尚未构建</title>
+<title>反诈助手 · Web 界面尚未构建</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;

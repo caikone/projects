@@ -3,39 +3,38 @@ import { useEffect, useRef } from "react";
 
 import type { ChatMessage } from "../types";
 import { MessageBubble } from "./MessageBubble";
-import { IconLayers, IconServer, IconSpark, IconTool } from "./icons";
+import { IconLayers, IconShield, IconSpark, IconTool } from "./icons";
 
 interface ChatStreamProps {
   messages: ChatMessage[];
   busy: boolean;
   onSuggestion: (text: string) => void;
-  hasMcp: boolean;
 }
 
 const SUGGESTIONS = [
   {
-    icon: <IconLayers size={16} />,
-    title: "梳理这个项目",
-    text: "帮我快速梳理当前项目的目录结构与核心模块，指出最值得优先阅读的三个文件。",
+    icon: <IconShield size={16} />,
+    title: "这条信息是诈骗吗",
+    text: "我收到一条短信，麻烦帮我判断是不是诈骗：\n（把短信原文、或来电说了什么粘贴在这里）",
   },
   {
     icon: <IconTool size={16} />,
-    title: "调用工具试试",
-    text: "用 RunCli 看一下当前目录的文件列表，并按类型归类说明。",
+    title: "要我转到安全账户",
+    text: "刚接到电话，对方说是公安局的，说我涉嫌洗钱，要我把钱转到「安全账户」验资，还不让我告诉家人。要不要转？",
   },
   {
-    icon: <IconServer size={16} />,
-    title: "检查 MCP",
-    text: "列出当前已连接的 MCP 服务器与它们暴露的工具，说明各自适合做什么。",
+    icon: <IconLayers size={16} />,
+    title: "家人疑似被骗",
+    text: "我爸妈最近在跟一个「投资导师」学炒股，已经投了几万块，说稳赚不赔。我该怎么劝？",
   },
   {
     icon: <IconSpark size={16} />,
-    title: "写一段代码",
-    text: "用 Python 写一个把 Markdown 转成纯文本的小脚本，要求带命令行参数与简单测试。",
+    title: "拆解套路 / 做演练",
+    text: "带我拆解一下「刷单返利」这类骗局的完整剧本，我想知道每一步他们是怎么让人上钩的。",
   },
 ];
 
-export function ChatStream({ messages, busy, onSuggestion, hasMcp }: ChatStreamProps) {
+export function ChatStream({ messages, busy, onSuggestion }: ChatStreamProps) {
   const scroller = useRef<HTMLDivElement | null>(null);
   const follow = useRef(true);
 
@@ -69,16 +68,16 @@ export function ChatStream({ messages, busy, onSuggestion, hasMcp }: ChatStreamP
       {visible.length === 0 ? (
         <div className="hero">
           <div className="hero-glyph">
-            <IconSpark size={22} />
+            <IconShield size={22} />
           </div>
           <h1>
-            让 TAgent 替你<span className="grad-text">跑一趟</span>
+            先把可疑信息<span className="grad-text">发给我</span>
           </h1>
           <p className="hero-sub">
-            本地文件、命令行、网页抓取、MCP 外部服务——一句需求，它自己挑工具。
+            短信、来电、链接、聊天记录、投资平台、转账要求——先说清风险等级，再谈怎么办。
           </p>
           <div className="hero-grid">
-            {SUGGESTIONS.filter((item) => hasMcp || item.title !== "检查 MCP").map((item) => (
+            {SUGGESTIONS.map((item) => (
               <button
                 key={item.title}
                 type="button"

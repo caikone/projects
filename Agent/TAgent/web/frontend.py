@@ -75,7 +75,7 @@ class WebFrontend(Frontend):
         url = "http://%s:%d" % ("127.0.0.1" if host in ("0.0.0.0", "::") else host, port)
         has_assets = os.path.isfile(os.path.join(assets, "index.html"))
 
-        print("[Web] TAgent 已启动：%s" % url, flush=True)
+        print("[Web] 反诈助手已启动：%s" % url, flush=True)
         if has_assets:
             print("[Web] 静态资源：%s" % assets, flush=True)
         else:

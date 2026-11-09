@@ -103,7 +103,6 @@ export default function App() {
         <ChatStream
           messages={agent.messages}
           busy={agent.busy}
-          hasMcp={(agent.mcp?.servers.length ?? 0) > 0}
           onSuggestion={(text) => void agent.actions.send(text)}
         />
 

@@ -1,8 +1,12 @@
-# TAgent —— core 与界面分离的终端智能助手
+# TAgent —— 反诈助手（Anti-Fraud Agent）
 
-由 `Agent/Practice02/chat_files.py`（单文件 900 行脚本）重构而来：
-**core 是零 UI 依赖的业务内核，tui 只是它的一个渲染器。**
-未来新增 Web / Desktop / Mobile 界面，只需在项目根目录新建一个与 `core/` 平级的目录。
+面向公众与机构的反诈骗智能助手：识别诈骗话术、阻断正在进行的转账、指导止损报案、
+支持家属劝阻与机构风控，并可作为反诈培训与演练的陪练。核心能力由内置技能包
+`.agents/skills/anti-fraud/` 提供（36 类骗局图谱 + 18 条信号评分 + 定级输出规范），
+人格与硬边界写在 `AGENTS.md`，回归用例在 `docs/anti-fraud/cases.json`。
+
+底层仍是 core 与界面分离的 Agent 框架：**core 是零 UI 依赖的业务内核，tui / web 只是它的渲染器。**
+新增界面只需在项目根目录新建一个与 `core/` 平级的目录。
 
 ---
 
@@ -113,6 +117,50 @@ max_read_bytes  = 1048576
 ; [ui] [sessions] [agent_docs] [mcp] [context] [cli] [webfetch]
 ; 完整清单见 config.example.ini（每项都有注释与默认值）
 ```
+
+---
+
+## 反诈能力：怎么用、怎么验
+
+启动后直接用自然语言描述处境即可，比如：
+
+```
+我接到一个电话，说是公安局的，说我账户涉嫌洗钱，让我把钱转到安全账户，还让我别告诉家人
+```
+
+助手会先中止操作、再给出命中信号与依据，最后才是共情与后续动作。三类输入的预期形态：
+
+| 输入 | 期望输出 |
+|---|---|
+| 正在转账 / 已给验证码 / 正在共享屏幕 | 🔴 开头一句 ≤30 字中止指令 → 强提醒卡 → 止损与报案步骤 |
+| 收到可疑短信、链接、兼职、投资邀请 | 🟡【提醒】+ 2~3 个核实动作 + 「未核实前不转账」 |
+| 想了解骗局套路 / 做演练 / 写机构方案 | 🟢 正常讲解，按需读取技能包里的图谱与模板 |
+
+技能包结构（`.agents/skills/anti-fraud/`，随仓库分发）：
+
+| 文件 | 作用 |
+|---|---|
+| `SKILL.md` | 入口：四角色、四条铁律、六步工作流、红线 |
+| `references/fraud-tactics.md` | 36 类骗局图谱与话术拆解 |
+| `references/red-flags.md` | 18 条信号评分表、反向证伪、擦边球推路 |
+| `references/verification-chain.md` | 真伪辨别链 L1–L6、证据标签、强提醒卡格式 |
+| `references/personal-response.md` | 止损 → 固证 → 报案 → 追损 → 防二次 |
+| `references/family-support.md` | 家属劝阻的三阶段话术与禁忌 |
+| `references/enterprise-risk-control.md` | 涉诈账户特征、10 条监测规则、机构内控 |
+| `references/legal-basis.md` | 反电诈法与帮信罪/掩隐罪对照 |
+| `references/drill-workflow.md` | 四角色实战演练与六维评分 |
+| `assets/*.md` | 书面《涉诈风险分析报告》《风控方案》模板 |
+| `scripts/risk_score.py` | 可复现打分：`--signals S01,S03` / `--list` |
+
+验证方式（用例集见 `docs/anti-fraud/cases.json`，10 个场景覆盖极高危/高危/中危/低危/无风险五档）：
+
+```bash
+python -m pytest tests/test_anti_fraud_skill.py -q   # 9 项：可发现性、文件完整性、打分一致性
+python .agents/skills/anti-fraud/scripts/risk_score.py --signals S01,S03   # 手工试打分
+```
+
+`test_referenced_resources_all_exist` 会校验 SKILL.md 里引用的每个文件真实存在——
+技能包最容易出的故障是「打包漏文件」，模型加载到一半 404 时极难排查，所以这条进了 CI。
 
 ---
 

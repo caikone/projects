@@ -26,5 +26,6 @@ Agent/TAgent/office/
 # 本机 MCP 运行时配置（含绝对路径，不入库；结构示例见 .mcp.example.json）
 .mcp.json
 
-# TAgent 运行时会话存档 / 上下文归档
-.agents/
+# TAgent 运行时会话存档 / 上下文归档（仅仓库根的临时运行目录）
+/.agents/
+/output/

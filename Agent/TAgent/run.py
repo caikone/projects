@@ -38,7 +38,7 @@ DEFAULT_UI = "tui"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run.py",
-        description="TAgent —— core 与界面分离的终端智能助手",
+        description="反诈助手（TAgent）—— 面向反诈骗场景的智能体，core 与界面分离",
     )
     parser.add_argument("prompt", nargs="*", help="启动后立即发送的第一条提问")
     parser.add_argument("--ui", default=DEFAULT_UI, help="选择界面（如 tui）；--ui list 查看全部")

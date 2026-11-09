@@ -1,6 +1,7 @@
 /** Markdown 渲染：GFM + 代码块一键复制。 */
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkGfm from "remark-gfm";
 
 import { IconCheck, IconCopy } from "./icons";
@@ -9,7 +10,10 @@ export function Markdown({ text }: { text: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        // remark-cjk-friendly：修掉 CommonMark 的中文标点边界问题。
+        // 例：`。**立即停止**这` —— 闭合的 ** 紧跟中文标点，规范判定为「不可闭合」，
+        // 结果整段星号原样输出。中文回答里这类写法极多，必须开。
+        remarkPlugins={[remarkGfm, remarkCjkFriendly]}
         components={{
           a: ({ children, href }) => (
             <a href={href} target="_blank" rel="noreferrer">

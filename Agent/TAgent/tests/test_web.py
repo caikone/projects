@@ -109,6 +109,23 @@ class WebApiTest(unittest.TestCase):
         roles = {m["role"] for m in data["session"]["messages"]}
         self.assertNotIn("system", roles)
 
+    def test_agents_doc_injection_is_not_exposed(self) -> None:
+        # AGENTS.md 是以「普通 user 消息」注入的，若不显式过滤，
+        # 前端会把整份人设渲染成用户发言。这里直接塞一条注入消息验证。
+        from core.domain.agents import render_agents_message
+
+        state = self.app.state.ta
+        state.session.insert_after_system(
+            ChatMessage.user(render_agents_message("AGENTS.md", "# 反诈助手\n四条铁律……")))
+        state.session.add_user("我接到一个电话，说要转安全账户")
+
+        data = self.client.get("/api/bootstrap").json()
+        contents = [m["content"] for m in data["session"]["messages"]]
+        self.assertEqual(len(contents), 1)
+        self.assertIn("安全账户", contents[0])
+        self.assertNotIn("四条铁律", contents[0])
+        self.assertEqual(data["session"]["message_count"], 1)
+
     def test_chat_streams_events(self) -> None:
         types: list[str] = []
         with self.client.stream("POST", "/api/chat", json={"text": "你好"}) as response:

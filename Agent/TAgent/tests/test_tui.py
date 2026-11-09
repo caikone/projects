@@ -45,6 +45,19 @@ async def _wait_done(app, pilot, rounds: int = 80) -> None:
             break
 
 
+def _roles_without_agents_doc(session) -> list[str]:
+    """返回会话的角色序列，滤掉 AGENTS.md 注入的那条 user 消息。
+
+    仓库根目录的 `AGENTS.md` 是反诈人设，启动时会作为一条普通 user 消息注入
+    （一次注入、全程复用），因此「空会话」不再只有 system 一条。
+    """
+    from core.domain.agents import looks_like_agents_message
+
+    return [m.role.value for m in session.messages
+            if not (m.role.value == "user"
+                    and looks_like_agents_message(m.content))]
+
+
 def _card_texts(view) -> list[str]:
     return [card.text for card in view.query(MessageCard)]
 
@@ -132,7 +145,7 @@ class TuiSmokeTest(unittest.TestCase):
 
                 app.action_new_session()
                 await pilot.pause()
-                self.assertEqual([m.role.value for m in app._session.messages], ["system"])
+                self.assertEqual(_roles_without_agents_doc(app._session), ["system"])
 
         asyncio.run(main())
 
@@ -742,7 +755,7 @@ class SlashCommandTest(unittest.TestCase):
 
                 await app._submit("/clear")
                 await pilot.pause()
-                roles = [m.role.value for m in app._session.messages]
+                roles = _roles_without_agents_doc(app._session)
                 self.assertEqual(roles, ["system"])
 
         asyncio.run(main())

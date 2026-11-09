@@ -41,10 +41,10 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">T</div>
+        <div className="brand-mark">反</div>
         <div className="brand-text">
-          <strong>TAgent</strong>
-          <span>本地智能体工作台</span>
+          <strong>反诈助手</strong>
+          <span>Anti-Fraud Agent</span>
         </div>
       </div>
 

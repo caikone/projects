@@ -59,8 +59,8 @@ class TAgentApp(App[None]):
     """TAgent 终端界面。"""
 
     CSS_PATH = "styles.tcss"
-    TITLE = "TAgent"
-    SUB_TITLE = "终端智能助手"
+    TITLE = "反诈助手"
+    SUB_TITLE = "Anti-Fraud Agent · TAgent"
     #: 关掉 Textual 自带的 Ctrl+P 命令面板：我们有更贴合业务的斜杠命令补全
     ENABLE_COMMAND_PALETTE = False
 
