@@ -1,0 +1,29 @@
+{
+  "name": "tagent-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TAgent 的浏览器界面：React + TypeScript + Slate",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "slate": "^0.110.2",
+    "slate-history": "^0.110.0",
+    "slate-react": "^0.110.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

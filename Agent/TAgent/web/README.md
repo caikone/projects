@@ -1,28 +1,50 @@
-# web/ —— Web 界面（预留）
+# web/ —— Web 界面（Python 侧网关）
 
-> 与 `core/` 平级的第 N 个界面实现。尚未实现，目录仅为占位与契约说明。
+浏览器界面由两部分组成，这里只负责「后端」那一半：
 
-落地三步（**不需要改动 core 或 run.py**）：
+```
+web/frontend.py    Frontend 实现：run.py --ui web 的入口（起 uvicorn / 算静态目录 / 开浏览器）
+web/server.py      Starlette 应用：HTTP API + SSE + 静态资源托管
+../frontend/       React + TypeScript + Slate 工程（构建到 frontend/dist）
+```
 
-1. 新建 `web/__init__.py` 与 `web/frontend.py`；
-2. 在 `frontend.py` 中实现 `Frontend` 子类并声明 `name = "web"`：
-   ```python
-   from core.ports.frontend import Frontend, FrontendContext
+## 为什么单独一层网关
 
-   class WebFrontend(Frontend):
-       name = "web"
-       description = "Web 界面（FastAPI + SSE）"
-       requires_tty = False
+`core` 只会 `yield` 事件，不会认识浏览器。这一层做三件事：
 
-       def run(self, ctx: FrontendContext) -> int:
-           import uvicorn
-           from .server import create_app
-           uvicorn.run(create_app(ctx), host="127.0.0.1", port=8000)
-           return 0
-   ```
-3. `python run.py --ui web` 即可启动（`core.frontend_registry` 会自动发现）。
+1. **翻译**：`AgentEvent` dataclass → JSON 帧（`event_payload`）；
+2. **搬运**：阻塞生成器放进工作线程，经 `queue.Queue` 变成 SSE（顺带拿到心跳能力）；
+3. **兜底**：单轮锁（409）、工具结果截断、静态资源回落页。
 
-要点：
-- 复用 `ctx.agent.stream_turn(session, text)` 的同一条事件流，逐个事件转成 SSE 推给浏览器；
-- 浏览器端工程放 `../frontend/`；
-- Web 相关的第三方依赖（fastapi / uvicorn）只允许出现在本目录。
+业务逻辑一行都不在这里——所以 Web 与 TUI 的行为天然一致。
+
+## 启动
+
+```bash
+cd ../frontend && npm install && npm run build && cd ..
+python run.py --ui web                 # http://127.0.0.1:8760
+```
+
+配置见 `config.ini` 的 `[web]` 段（host / port / open_browser / assets_dir / heartbeat_seconds）。
+
+## API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/bootstrap` | 会话 + 工具 + MCP + 用量 + 模型 |
+| POST | `/api/chat` | SSE 事件流 |
+| POST | `/api/cancel` | 中止本轮 |
+| POST | `/api/session/new` `/save` `/resume` | 会话操作 |
+| GET | `/api/sessions` | 历史列表 |
+| POST | `/api/compact` | 压缩上下文 |
+| GET | `/api/mcp` | MCP 状态（后台加载完轮询） |
+| GET | `/api/health` | 探活 |
+
+## 测试
+
+`tests/test_web.py` 用 Starlette `TestClient` 覆盖契约、SSE 时序、会话存档与静态托管，
+不联网、不起端口：
+
+```bash
+python -m pytest tests/test_web.py -q      # 16 用例
+```
