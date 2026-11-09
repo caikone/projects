@@ -37,9 +37,11 @@ class Spinner(Static):
 
     DEFAULT_CLASSES = "spinner"
 
-    def __init__(self, frames: tuple[str, ...] = SPINNER_FRAMES, **kwargs) -> None:
+    def __init__(self, frames: tuple[str, ...] = SPINNER_FRAMES,
+                 interval: float = SPINNER_INTERVAL, **kwargs) -> None:
         super().__init__(frames[0], **kwargs)
         self._frames = frames
+        self._interval = max(0.02, float(interval or SPINNER_INTERVAL))
         self._index = 0
         self._timer = None
 
@@ -53,7 +55,7 @@ class Spinner(Static):
         if self._timer is not None:
             return
         self.remove_class("-stopped")
-        self._timer = self.set_interval(SPINNER_INTERVAL, self.advance)
+        self._timer = self.set_interval(self._interval, self.advance)
 
     def stop(self) -> None:
         """停止动画并复位。"""
@@ -89,8 +91,9 @@ class ThinkingBar(Horizontal):
 
     IDLE_HINT = HINT_SINGLE_LINE
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, spinner_interval: float = SPINNER_INTERVAL, **kwargs) -> None:
         super().__init__(**kwargs)
+        self._spinner_interval = max(0.02, float(spinner_interval or SPINNER_INTERVAL))
         self._busy = False
         self._label = ""
         self._hint = HINT_SINGLE_LINE
@@ -99,7 +102,7 @@ class ThinkingBar(Horizontal):
 
     # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
-        self._spinner = Spinner(id="think-spinner")
+        self._spinner = Spinner(interval=self._spinner_interval, id="think-spinner")
         self._text = Static(self._hint, id="think-text", classes="hint-idle")
         yield self._spinner
         yield self._text

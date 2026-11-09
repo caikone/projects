@@ -9,17 +9,30 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.config.template import ensure_local_config  # noqa: E402
 from core.container import AppContainer  # noqa: E402
+from core.config.models import SessionSettings  # noqa: E402
+from core.domain.mcp import McpServerView, McpSnapshot  # noqa: E402
 from core.infrastructure.llm.mock import ScriptedLLMClient  # noqa: E402
 from textual import events  # noqa: E402
 from textual.widgets import Markdown  # noqa: E402
 from tui.app import TAgentApp  # noqa: E402
 from tui.text_utils import has_non_ascii  # noqa: E402
-from tui.widgets import ChatInput, ChatView, StatusBar, ThinkingBar, ToolPanel  # noqa: E402
+from tui.widgets import (  # noqa: E402
+    ChatInput,
+    ChatView,
+    CommandPalette,
+    Sidebar,
+    StatusBar,
+    ThinkingBar,
+    ToolPanel,
+)
+from tui.widgets.dialogs import ConfigNoticeScreen, ResumeScreen  # noqa: E402
 from tui.widgets.message_card import MessageCard  # noqa: E402
 from tui.widgets.thinking_bar import Spinner  # noqa: E402
 from tui.widgets.tool_panel import ToolCallCard  # noqa: E402
@@ -36,9 +49,18 @@ def _card_texts(view) -> list[str]:
     return [card.text for card in view.query(MessageCard)]
 
 
-def build_app(script):
-    container = AppContainer.build(llm=ScriptedLLMClient(script))
+def build_app(script, metadata=None, project_root=None, overrides=None):
+    # 单元测试不依赖网络：显式关闭 MCP（项目目录下存在 .mcp.json 时会去连服务器）
+    settings_overrides = {"mcp_enabled": False,
+                          "sessions": SessionSettings(autosave=False)}
+    if overrides:
+        settings_overrides.update(overrides)
+    container = AppContainer.build(llm=ScriptedLLMClient(script),
+                                   overrides=settings_overrides,
+                                   project_root=project_root)
     ctx = container.build_context()
+    if metadata:
+        ctx.metadata.update(metadata)
     return TAgentApp(ctx)
 
 
@@ -485,6 +507,387 @@ class TuiSmokeTest(unittest.TestCase):
                 await pilot.pause()
 
                 self.assertIn("多行输入", bar._text.content)
+
+        asyncio.run(main())
+
+    # ------------------------------------------------------------------
+    # MCP：状态栏摘要与启动提示
+    # ------------------------------------------------------------------
+    def test_status_bar_shows_mcp_summary(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}], metadata={
+                "mcp": "MCP 1/2 · 3 个工具（Bazi-MCP 未连接）",
+            })
+            async with app.run_test(size=(150, 40)) as pilot:
+                await pilot.pause()
+                text = app.query_one(StatusBar)._model_text()
+                self.assertIn("MCP 1/2", text)
+                self.assertIn("Bazi-MCP 未连接", text)
+
+        asyncio.run(main())
+
+    def test_mcp_notices_rendered_on_startup(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}], metadata={
+                "mcp_notices": ["MCP 服务器「Bazi-MCP」不可用：MCPError: Not Found"],
+            })
+            async with app.run_test(size=(150, 40)) as pilot:
+                await pilot.pause()
+                texts = _card_texts(app.query_one(ChatView))
+                self.assertTrue(any("Bazi-MCP" in t for t in texts))
+                self.assertTrue(any("Not Found" in t for t in texts))
+
+        asyncio.run(main())
+
+    # ------------------------------------------------------------------
+    # 上下文：状态栏用量、阈值拦截、/compact 命令
+    # ------------------------------------------------------------------
+    def test_status_bar_shows_context_usage_with_default_hint(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(160, 40)) as pilot:
+                await pilot.pause()
+                status = app.query_one(StatusBar)
+                status.set_usage(12288, 131072, 9, window_is_default=True)
+                text = status._usage_text()
+                self.assertIn("上下文 12k / 128k（默认）", text)
+                self.assertIn("9%", text)
+
+        asyncio.run(main())
+
+    def test_threshold_blocks_plain_input_until_compacted(self) -> None:
+        from core.domain.events import ContextUsageUpdated
+
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(160, 40)) as pilot:
+                await pilot.pause()
+                # 模拟一轮结束后的用量事件：超过 80%
+                app._enqueue(ContextUsageUpdated(
+                    used_tokens=100000, window_tokens=131072, percent=80,
+                    window_is_default=True, warning=True))
+                for _ in range(20):
+                    await pilot.pause(0.05)
+                    if app._context_blocked:
+                        break
+                self.assertTrue(app._context_blocked)
+
+                # 普通输入被拒绝，且不会进入对话流程
+                await app._submit("继续干活")
+                self.assertFalse(app._busy)
+                texts = _card_texts(app.query_one(ChatView))
+                self.assertTrue(any("/compact" in t for t in texts))
+
+                # /compact 仍被允许进入压缩流程
+                self.assertIsNotNone(app.ctx.context)
+
+        asyncio.run(main())
+
+    def test_compact_command_replaces_history_and_unlocks_input(self) -> None:
+        async def main() -> None:
+            # 脚本第一项就是压缩时模型返回的摘要（本用例不跑普通对话）
+            app = build_app([{"text": "## 摘要\n用户正在验证上下文压缩"}])
+            async with app.run_test(size=(160, 40)) as pilot:
+                await pilot.pause()
+                # 先攒一点历史（直接写入会话，避免等流式渲染）
+                app._session.add_user("历史问题")
+                app._session.add_assistant("历史回答")
+
+                await app._submit("/compact")
+                for _ in range(120):
+                    await pilot.pause(0.05)
+                    if not app._compacting and not app._busy:
+                        break
+
+                self.assertFalse(app._compacting)
+                self.assertEqual(len(app._session.messages), 2)   # system + 摘要
+                self.assertIn("摘要", app._session.messages[-1].content or "")
+                texts = " ".join(_card_texts(app.query_one(ChatView)))
+                self.assertIn("压缩完成", texts)
+                # 输入框已解锁
+                self.assertFalse(app.query_one(ChatInput).locked)
+
+        asyncio.run(main())
+
+    def test_unknown_command_is_reported(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(160, 40)) as pilot:
+                await pilot.pause()
+                await app._submit("/nope")
+                self.assertFalse(app._busy)
+                texts = " ".join(_card_texts(app.query_one(ChatView)))
+                self.assertIn("未知命令", texts)
+
+        asyncio.run(main())
+
+
+class SlashCommandTest(unittest.TestCase):
+    """斜杠命令与补全面板。"""
+
+    def test_palette_opens_and_filters(self) -> None:
+        from tui.commands import COMMANDS
+
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                box = app.query_one(ChatInput)
+                box.focus()
+
+                box.load_text("/")
+                await pilot.pause()
+                palette = app.query_one(CommandPalette)
+                self.assertTrue(palette.visible)
+                self.assertEqual(len(palette.matches), len(COMMANDS))
+
+                box.load_text("/sav")
+                await pilot.pause()
+                self.assertEqual([c.name for c in palette.matches], ["/save"])
+
+                box.load_text("普通文本")
+                await pilot.pause()
+                self.assertFalse(palette.visible)
+
+        asyncio.run(main())
+
+    def test_palette_enter_runs_command(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                box = app.query_one(ChatInput)
+                box.focus()
+                box.load_text("/he")
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause(0.1)
+                texts = " ".join(_card_texts(app.query_one(ChatView)))
+                self.assertIn("可用命令", texts)
+                self.assertFalse(app.query_one(CommandPalette).visible)
+
+        asyncio.run(main())
+
+    def test_palette_up_down_and_tab(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                box = app.query_one(ChatInput)
+                box.focus()
+                box.load_text("/")
+                await pilot.pause()
+                palette = app.query_one(CommandPalette)
+                start = palette.highlight_index
+
+                await pilot.press("down")
+                self.assertEqual(palette.highlight_index, (start + 1) % len(palette.matches))
+                await pilot.press("up")
+                self.assertEqual(palette.highlight_index, start)
+
+                box.load_text("/sav")
+                await pilot.pause()
+                await pilot.press("tab")
+                await pilot.pause()
+                self.assertEqual(box.text, "/save")
+                self.assertFalse(palette.visible)
+                self.assertFalse(app._busy)
+
+        asyncio.run(main())
+
+    def test_escape_closes_palette(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                box = app.query_one(ChatInput)
+                box.focus()
+                box.load_text("/re")
+                await pilot.pause()
+                await pilot.press("escape")
+                await pilot.pause()
+                self.assertFalse(app.query_one(CommandPalette).visible)
+                self.assertEqual(box.text, "/re")
+
+        asyncio.run(main())
+
+    def test_help_tools_context_config(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            async with app.run_test(size=(140, 44)) as pilot:
+                await pilot.pause()
+                for command, expected in (
+                    ("/help", "可用命令"),
+                    ("/tools", "isLeapYear"),
+                    ("/context", "上下文"),
+                    ("/config", "配置文件"),
+                    ("/model", "接口"),
+                    ("/skills", "Skill"),
+                ):
+                    await app._submit(command)
+                    await pilot.pause()
+                    texts = " ".join(_card_texts(app.query_one(ChatView)))
+                    self.assertIn(expected, texts, command)
+
+        asyncio.run(main())
+
+    def test_clear_keeps_system_prompt(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "回答"}])
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await app._submit("你好")
+                await _wait_done(app, pilot)
+                self.assertGreater(len(app._session.messages), 1)
+
+                await app._submit("/clear")
+                await pilot.pause()
+                roles = [m.role.value for m in app._session.messages]
+                self.assertEqual(roles, ["system"])
+
+        asyncio.run(main())
+
+
+class SessionCommandTest(unittest.TestCase):
+    """会话保存 / 新建 / 恢复。"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        ensure_local_config(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_save_then_new_then_resume(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "第一轮回答"}],
+                            project_root=self.tmp.name,
+                            overrides={"sessions": SessionSettings(autosave=True)})
+            async with app.run_test(size=(140, 44)) as pilot:
+                await pilot.pause()
+                self.assertFalse(app.config_created)
+                await app._submit("你好")
+                await _wait_done(app, pilot)
+                original_id = app._session.id
+
+                await app._submit("/save")
+                await pilot.pause()
+                saved = app.ctx.sessions.list_summaries()
+                self.assertEqual(len(saved), 1)
+                self.assertEqual(saved[0].id, original_id)
+
+                await app._submit("/new")
+                await pilot.pause()
+                self.assertNotEqual(app._session.id, original_id)
+
+                await app._submit("/resume")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ResumeScreen)
+                await pilot.press("enter")
+                for _ in range(40):
+                    await pilot.pause(0.05)
+                    if app._session.id == original_id:
+                        break
+                self.assertEqual(app._session.id, original_id)
+                texts = " ".join(_card_texts(app.query_one(ChatView)))
+                self.assertIn("已恢复会话", texts)
+                self.assertIn("第一轮回答", texts)
+
+        asyncio.run(main())
+
+    def test_new_session_autosaves_previous(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "回答"}],
+                            project_root=self.tmp.name,
+                            overrides={"sessions": SessionSettings(autosave=True)})
+            async with app.run_test(size=(140, 44)) as pilot:
+                await pilot.pause()
+                await app._submit("第一段")
+                await _wait_done(app, pilot)
+                first_id = app._session.id
+                await app._submit("/new")
+                for _ in range(20):
+                    await pilot.pause(0.05)
+                    if app._session.id != first_id:
+                        break
+                ids = [s.id for s in app.ctx.sessions.list_summaries()]
+                self.assertIn(first_id, ids)
+
+        asyncio.run(main())
+
+    def test_resume_without_sessions_shows_hint(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}], project_root=self.tmp.name)
+            async with app.run_test(size=(140, 44)) as pilot:
+                await pilot.pause()
+                await app._submit("/resume")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ResumeScreen)
+                self.assertEqual(app.screen.query("#session-list").nodes, [])
+                await pilot.press("escape")
+                await pilot.pause()
+                self.assertNotIsInstance(app.screen, ResumeScreen)
+
+        asyncio.run(main())
+
+
+class McpSidebarTest(unittest.TestCase):
+    def test_async_load_updates_sidebar_and_status(self) -> None:
+        async def main() -> None:
+            app = build_app([{"text": "x"}])
+            snapshot = McpSnapshot(
+                servers=(McpServerView(
+                    name="demo", key="demo", transport="http",
+                    endpoint="http://127.0.0.1:9/mcp", connected=True,
+                    tool_count=2, server_info="demo 1.0",
+                    tools=("mcp__demo__alpha", "mcp__demo__beta"),
+                ),),
+                total_tools=2, loaded=True)
+            app.ctx.load_mcp = lambda: snapshot
+            app.mcp_loading = True
+
+            async with app.run_test(size=(140, 44)) as pilot:
+                await pilot.pause()
+                app._load_mcp()
+                for _ in range(40):
+                    await pilot.pause(0.05)
+                    if not app.mcp_loading:
+                        break
+                self.assertFalse(app.mcp_loading)
+
+                sidebar = app.query_one(Sidebar)
+                text = "\n".join(str(widget.render())
+                                 for widget in sidebar.query("Static"))
+                self.assertIn("demo", text)
+                self.assertIn("mcp__demo__alpha", text)
+                self.assertIn("MCP 1/1", app.query_one(StatusBar)._mcp)
+
+                await app._submit("/mcp")
+                await pilot.pause()
+                body = " ".join(_card_texts(app.query_one(ChatView)))
+                self.assertIn("mcp__demo__beta", body)
+
+        asyncio.run(main())
+
+
+class ConfigNoticeTest(unittest.TestCase):
+    def test_dialog_appears_when_config_generated(self) -> None:
+        async def main() -> None:
+            tmp = tempfile.TemporaryDirectory()
+            try:
+                app = build_app([{"text": "x"}], project_root=tmp.name)
+                async with app.run_test(size=(140, 44)) as pilot:
+                    for _ in range(30):
+                        await pilot.pause(0.05)
+                        if isinstance(app.screen, ConfigNoticeScreen):
+                            break
+                    self.assertTrue(app.config_created)
+                    self.assertIsInstance(app.screen, ConfigNoticeScreen)
+                    await pilot.press("escape")
+                    await pilot.pause()
+                    self.assertNotIsInstance(app.screen, ConfigNoticeScreen)
+            finally:
+                tmp.cleanup()
 
         asyncio.run(main())
 

@@ -13,6 +13,10 @@ from __future__ import annotations
 from core.domain.events import (
     AssistantMessageCompleted,
     AssistantTextDelta,
+    ContextCompacted,
+    ContextCompactFailed,
+    ContextCompactStarted,
+    ContextUsageUpdated,
     ErrorOccurred,
     RoundFinished,
     ToolCallCompleted,
@@ -39,6 +43,14 @@ class AgentEventBridge:
         self.thinking = thinking
         self._turns = 0
         self._tool_calls = 0
+        #: 阈值告警只提示一次，用量回落后自动复位
+        self._usage_warned = False
+
+    def reset_counters(self) -> None:
+        """切换会话时重置轮次统计与告警状态（不算业务，只是界面计数）。"""
+        self._turns = 0
+        self._tool_calls = 0
+        self._usage_warned = False
 
     # ------------------------------------------------------------------
     async def handle(self, event) -> None:
@@ -57,6 +69,14 @@ class AgentEventBridge:
             self._on_message_completed(event)
         elif isinstance(event, ErrorOccurred):
             await self._on_error(event)
+        elif isinstance(event, ContextUsageUpdated):
+            await self._on_context_usage(event)
+        elif isinstance(event, ContextCompactStarted):
+            self._on_compact_started(event)
+        elif isinstance(event, ContextCompacted):
+            await self._on_compacted(event)
+        elif isinstance(event, ContextCompactFailed):
+            await self._on_compact_failed(event)
         elif isinstance(event, TurnCompleted):
             await self._on_turn_completed(event)
 
@@ -117,3 +137,52 @@ class AgentEventBridge:
             self.status.set_state("空闲", "idle")
         if self.thinking is not None:
             self.thinking.set_label("收尾中…")
+
+    # ------------------------------------------------------------------
+    # 上下文用量与压缩
+    # ------------------------------------------------------------------
+    async def _on_context_usage(self, event: ContextUsageUpdated) -> None:
+        self.status.set_usage(event.used_tokens, event.window_tokens,
+                              event.percent, event.window_is_default)
+        if event.warning and not self._usage_warned:
+            self._usage_warned = True
+            await self.chat.add_notice(
+                "⚠ 上下文已使用 %d%%（%s / %s%s）。已达到压缩阈值，"
+                "普通输入已暂停，请执行 /compact 压缩上下文后继续。"
+                % (event.percent,
+                   _k(event.used_tokens), _k(event.window_tokens),
+                   "，默认窗口" if event.window_is_default else ""))
+        elif not event.warning:
+            # 压缩后用量回落：允许下一次再提示
+            self._usage_warned = False
+
+    def _on_compact_started(self, event: ContextCompactStarted) -> None:
+        self.status.set_state("正在压缩上下文…", "thinking")
+        if self.thinking is not None:
+            self.thinking.set_busy("正在压缩上下文…")
+
+    async def _on_compacted(self, event: ContextCompacted) -> None:
+        self._usage_warned = False
+        note = ("上下文压缩完成：%d 条历史 → 摘要，约 %s → %s。\n"
+                "归档编号 %s（%s）。需要细节时可用 recallContext 检索原始记录。"
+                % (event.message_count, _k(event.tokens_before),
+                   _k(event.tokens_after), event.archive_id, event.archive_path))
+        if event.summary_truncated:
+            note += "\n（摘要超出约 5,000 Tokens 上限，已本地截断。）"
+        await self.chat.add_notice(note)
+        self.status.set_state("压缩完成", "idle")
+        if self.thinking is not None:
+            self.thinking.set_label("压缩完成")
+
+    async def _on_compact_failed(self, event: ContextCompactFailed) -> None:
+        self.status.set_state("压缩失败", "error")
+        if self.thinking is not None:
+            self.thinking.set_label("压缩失败")
+        await self.chat.add_error(event.message)
+
+
+def _k(tokens: int) -> str:
+    """Token 数的紧凑显示（与状态栏保持一致）。"""
+    if tokens >= 1024:
+        return "%.1fk" % (tokens / 1024)
+    return str(tokens)

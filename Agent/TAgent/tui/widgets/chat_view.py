@@ -17,16 +17,29 @@ FLUSH_INTERVAL = 1 / 20
 class ChatView(VerticalScroll):
     """对话消息列表。"""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, flush_interval: float = FLUSH_INTERVAL, **kwargs) -> None:
         super().__init__(**kwargs)
         self._streaming: MessageCard | None = None
         self._timer = None
+        self._empty_hint: Static | None = None
+        #: 流式重绘节流间隔（秒），来自 `[ui] stream_flush_interval_ms`
+        self._flush_interval = max(0.005, float(flush_interval or FLUSH_INTERVAL))
         #: 是否自动跟随到底部（用户往上翻看历史时暂停跟随，避免被强行拽回）
         self._follow = True
 
     # ------------------------------------------------------------------
     def on_mount(self) -> None:
-        self._timer = self.set_interval(FLUSH_INTERVAL, self.flush)
+        self._timer = self.set_interval(self._flush_interval, self.flush)
+
+    def set_flush_interval(self, seconds: float) -> None:
+        """运行期调整刷新间隔（换配置后无需重建界面）。"""
+        interval = max(0.005, float(seconds or FLUSH_INTERVAL))
+        if abs(interval - self._flush_interval) < 1e-6:
+            return
+        self._flush_interval = interval
+        if self._timer is not None:
+            self._timer.stop()
+        self._timer = self.set_interval(self._flush_interval, self.flush)
 
     def on_unmount(self) -> None:
         if self._timer is not None:
@@ -47,6 +60,7 @@ class ChatView(VerticalScroll):
     # ------------------------------------------------------------------
     async def add_message(self, sender: str, text: str, kind: str = "assistant") -> MessageCard:
         """追加一条完整消息（非流式）。返回卡片以便后续修改。"""
+        await self._drop_hint()
         card = MessageCard(sender=sender, kind=kind, text=text)
         await self.mount(card)
         self._after_change()
@@ -56,11 +70,21 @@ class ChatView(VerticalScroll):
         """开启一条流式消息；若上一条未结束则复用它（多轮工具调用场景）。"""
         if self._streaming is not None:
             return self._streaming
+        await self._drop_hint()
         card = MessageCard(sender=sender, kind="assistant")
         await self.mount(card)
         self._streaming = card
         self._after_change()
         return card
+
+    async def _drop_hint(self) -> None:
+        """第一条消息出现后收起「新会话已开始」的占位提示。"""
+        hint, self._empty_hint = self._empty_hint, None
+        if hint is not None:
+            try:
+                await hint.remove()
+            except Exception:  # pragma: no cover - 已被父节点清理时不报错
+                pass
 
     async def stream_text(self, delta: str) -> None:
         """向当前流式消息追加文本。"""
@@ -96,8 +120,10 @@ class ChatView(VerticalScroll):
     async def clear_messages(self) -> None:
         """清空对话区。"""
         self._streaming = None
+        self._empty_hint = None
         await self.remove_children()
-        await self.mount(Static("新会话已开始，输入内容开始对话。", classes="empty-hint"))
+        self._empty_hint = Static("新会话已开始，输入内容开始对话。", classes="empty-hint")
+        await self.mount(self._empty_hint)
         self.scroll_end(animate=False)
 
     # ------------------------------------------------------------------

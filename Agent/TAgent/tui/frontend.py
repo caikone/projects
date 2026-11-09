@@ -22,6 +22,8 @@ class TuiFrontend(Frontend):
     name = "tui"
     description = "终端 TUI 界面（Textual，默认）"
     requires_tty = True
+    #: 先让界面出来，MCP 在后台线程连接，连上后动态刷新边栏
+    defer_mcp = True
 
     def run(self, ctx: FrontendContext) -> int:
         if requires_headless_fallback():

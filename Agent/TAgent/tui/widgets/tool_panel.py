@@ -52,13 +52,14 @@ class ToolCallCard(Collapsible):
             round_index, _format_arguments(arguments_json, arguments))
         self._detail.update(self.detail_text)
 
-    def set_finished(self, ok: bool, content: str, elapsed_ms: int) -> None:
+    def set_finished(self, ok: bool, content: str, elapsed_ms: int,
+                     preview_chars: int = PREVIEW_MAX) -> None:
         mark = "✓" if ok else "✗"
         self.title = "%s %s  (%d ms · %s 字符)" % (
             mark, self.tool_name, elapsed_ms, len(content or ""))
         self.remove_class("tool-running")
         self.add_class("tool-ok" if ok else "tool-fail")
-        self.detail_text = _preview(content)
+        self.detail_text = _preview(content, preview_chars)
         self._detail.update(self.detail_text)
         if not ok:
             self.collapsed = False
@@ -67,10 +68,12 @@ class ToolCallCard(Collapsible):
 class ToolPanel(VerticalScroll):
     """工具活动侧栏。"""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, preview_chars: int = PREVIEW_MAX, **kwargs) -> None:
         super().__init__(**kwargs)
         self._cards: dict[str, ToolCallCard] = {}
         self._empty: Static | None = None
+        #: 单条结果的预览字符数（来自 `[ui] tool_preview_chars`）
+        self._preview_chars = max(80, int(preview_chars or PREVIEW_MAX))
 
     # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -94,8 +97,11 @@ class ToolPanel(VerticalScroll):
         card = self._cards.get(call_id)
         if card is None:
             return
-        card.set_finished(ok, content, elapsed_ms)
+        card.set_finished(ok, content, elapsed_ms, self._preview_chars)
         self.scroll_end(animate=False)
+
+    def set_preview_chars(self, chars: int) -> None:
+        self._preview_chars = max(80, int(chars or PREVIEW_MAX))
 
     async def reset(self) -> None:
         """清空面板（新会话时调用）。"""

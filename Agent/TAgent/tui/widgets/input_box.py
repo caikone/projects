@@ -25,6 +25,8 @@ Textual 在 Windows 上通过 `ReadConsoleInputW` 读键（见 `textual/drivers/
 
 from __future__ import annotations
 
+from typing import Awaitable, Callable
+
 from textual.binding import Binding
 from textual.events import Key, Paste
 from textual.message import Message
@@ -43,7 +45,13 @@ NEWLINE_KEYS = frozenset({"shift+enter", "ctrl+j"})
 SUBMIT_KEYS = frozenset({"ctrl+s"})
 
 #: 输入框为空时的占位提示
-PLACEHOLDER = "输入消息，Enter 发送 · Ctrl+J 换行 · Ctrl+S 立即发送"
+PLACEHOLDER = "输入消息，Enter 发送 · Ctrl+J 换行 · 输入 / 查看命令"
+
+#: 需要先交给外部（命令补全面板）处理的按键
+NAVIGATION_KEYS = frozenset({"up", "down", "tab", "escape", "enter"})
+
+#: 外部按键处理函数：返回 True 表示「已消费」，输入框不再处理
+Navigator = Callable[[str], Awaitable[bool]]
 
 
 class ChatInput(TextArea):
@@ -74,6 +82,12 @@ class ChatInput(TextArea):
         super().__init__(**kwargs)
         self._locked = False
         self._repairing = False
+        #: 命令补全面板的按键拦截器（由 App 注入，未显示面板时不做任何事）
+        self._navigator: Navigator | None = None
+
+    def set_navigator(self, navigator: Navigator | None) -> None:
+        """注入按键拦截器（用于命令补全的上下选择 / Enter / Esc）。"""
+        self._navigator = navigator
 
     # ==================================================================
     # 锁定状态（等待模型回复时不可提交）
@@ -97,6 +111,13 @@ class ChatInput(TextArea):
     # ==================================================================
     async def _on_key(self, event: Key) -> None:
         key = event.key
+
+        # 补全面板可见时，上下键 / Enter / Tab / Esc 归面板所有
+        if (self._navigator is not None and key in NAVIGATION_KEYS
+                and await self._navigator(key)):
+            event.stop()
+            event.prevent_default()
+            return
 
         if key in SUBMIT_KEYS:
             event.stop()
