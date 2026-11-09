@@ -1,0 +1,98 @@
+{
+  "description": "反诈技能回归用例。每条给出场景、命中信号与 risk_score.py 的期望输出；用例同时作为报告中的评测数据集。",
+  "version": "1.0.0",
+  "signal_source": ".agents/skills/anti-fraud/references/red-flags.md",
+  "cases": [
+    {
+      "id": "AF-01",
+      "scene": "自称公安，称账户涉嫌洗钱，要求把钱转到「安全账户」并保密",
+      "signals": ["S01", "S05", "S11", "S12"],
+      "expect_total": 80,
+      "expect_level": "极高危",
+      "expect_verdict": "是诈骗",
+      "expect_exit": 1
+    },
+    {
+      "id": "AF-02",
+      "scene": "短视频平台招兼职，先垫付刷单小额返利，后续要求加大投入才能提现",
+      "signals": ["S06", "S11", "S14"],
+      "expect_total": 55,
+      "expect_level": "高危",
+      "expect_verdict": "高度疑似",
+      "expect_exit": 1
+    },
+    {
+      "id": "AF-03",
+      "scene": "自称微信客服，说百万保障即将扣费，要求下载 App 并开启屏幕共享协助关闭",
+      "signals": ["S18", "S02", "S03"],
+      "expect_total": 80,
+      "expect_level": "极高危",
+      "expect_verdict": "是诈骗",
+      "expect_exit": 1
+    },
+    {
+      "id": "AF-04",
+      "scene": "称校园贷未注销会影响征信，要求共享屏幕并按指引操作资金",
+      "signals": ["S03", "S05", "S11"],
+      "expect_total": 70,
+      "expect_level": "极高危",
+      "expect_verdict": "是诈骗",
+      "expect_exit": 1,
+      "note": "原始 60 分，命中一票否决后总分抬到 70 下限"
+    },
+    {
+      "id": "AF-05",
+      "scene": "网恋对象介绍「内部投资渠道」，先代操作盈利后诱导借款投入",
+      "signals": ["S16", "S07", "S10"],
+      "expect_total": 65,
+      "expect_level": "高危",
+      "expect_verdict": "高度疑似",
+      "expect_exit": 1
+    },
+    {
+      "id": "AF-06",
+      "scene": "荐股导师承诺保本高收益，要求向多个不同个人账户分批转账，并以黄金交割",
+      "signals": ["S07", "S08", "S09"],
+      "expect_total": 70,
+      "expect_level": "极高危",
+      "expect_verdict": "是诈骗",
+      "expect_exit": 1
+    },
+    {
+      "id": "AF-07",
+      "scene": "陌生号码冒充公司领导，称在开会不便通话，要求立即垫付一笔货款",
+      "signals": ["S05", "S11"],
+      "expect_total": 35,
+      "expect_level": "中危",
+      "expect_verdict": "存疑",
+      "expect_exit": 0
+    },
+    {
+      "id": "AF-08",
+      "scene": "银行官方 App 内推送的常规验证码提示，无任何转账或共享要求",
+      "signals": [],
+      "expect_total": 0,
+      "expect_level": "未见明显风险",
+      "expect_verdict": "暂未识别到诈骗特征",
+      "expect_exit": 0
+    },
+    {
+      "id": "AF-09",
+      "scene": "正规商场限时促销，导购强调今日折扣力度大，可到店体验后购买",
+      "signals": ["S11", "S15"],
+      "expect_total": 25,
+      "expect_level": "低危",
+      "expect_verdict": "可疑",
+      "expect_exit": 0
+    },
+    {
+      "id": "AF-10",
+      "scene": "陌生短信链接要求下载描述文件「验证身份」，页面要求填写银行卡与有效期",
+      "signals": ["S04", "S13"],
+      "expect_total": 40,
+      "expect_level": "中危",
+      "expect_verdict": "存疑",
+      "expect_exit": 0
+    }
+  ]
+}
