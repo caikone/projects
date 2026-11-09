@@ -47,6 +47,11 @@ class ScriptedLLMClient(LLMClient):
                               arguments_fragment=call.get("arguments", "{}"))
             ])
 
+        # 可选：模拟厂商在流末尾单独下发 usage（用于测试上下文计量）
+        usage = item.get("usage")
+        if usage:
+            yield LLMChunk(usage=dict(usage))
+
         yield LLMChunk(finish_reason="tool_calls" if item.get("tool_calls") else "stop")
 
     # ------------------------------------------------------------------

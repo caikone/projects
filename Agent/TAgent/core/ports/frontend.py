@@ -21,7 +21,9 @@ from ..ports.tools import ToolRegistry
 
 if TYPE_CHECKING:  # 仅类型标注需要，避免 core.services ↔ core.ports 循环导入
     from ..services.agent import AgentService
+    from ..services.context import ContextService
     from ..services.session import Session
+    from ..services.sessions import SessionService
 
 
 @dataclass
@@ -45,6 +47,16 @@ class FrontendContext:
     initial_prompt: str | None = None
     new_session: Callable[[], Session] | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+    #: 上下文压缩服务（`/compact` 与状态栏用量展示用；未装配时为 None）
+    context: ContextService | None = None
+    #: 会话存档服务（`/save` `/resume` 用；未装配时为 None）
+    sessions: SessionService | None = None
+    #: Skill 服务（`/skills` 展示清单用；未装配时为 None）
+    skills: object | None = None
+    #: 后台加载 MCP 并注册工具（TUI 用来「先进界面、再连服务器」）
+    load_mcp: Callable[[], object] | None = None
+    #: 恢复历史会话后的补齐动作（注入 AGENTS.md 等）
+    prepare_session: Callable[[Session], Session] | None = None
 
 
 class Frontend(ABC):
@@ -60,6 +72,8 @@ class Frontend(ABC):
     description: ClassVar[str] = ""
     #: 是否需要交互式终端（无 TTY 环境可据此拒绝启动）
     requires_tty: ClassVar[bool] = False
+    #: 是否把 MCP 连接推迟到界面启动之后（TUI 用：先进界面，再后台连服务器）
+    defer_mcp: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

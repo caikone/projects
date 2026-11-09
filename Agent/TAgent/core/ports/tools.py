@@ -50,9 +50,14 @@ class ToolSpec:
     required: list[str] = field(default_factory=list)
     #: 危险操作（删除类）会被 UI 高亮提示
     destructive: bool = False
+    #: 原样透传的 JSON Schema（MCP 工具的 inputSchema 可能是嵌套对象/oneOf，
+    #: 无法用扁平的 `params` 表达）。设置后 `to_json_schema()` 直接返回它。
+    raw_schema: dict[str, Any] | None = None
 
     def to_json_schema(self) -> dict[str, Any]:
         """参数对象的 JSON Schema。"""
+        if self.raw_schema is not None:
+            return dict(self.raw_schema)
         return {
             "type": "object",
             "properties": {k: v.to_json_schema() for k, v in self.params.items()},

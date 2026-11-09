@@ -22,3 +22,9 @@ config.ini
 
 # TAgent 本地实验目录（OfficeCli 二进制、加密样例文档等，体量大且不属于项目代码）
 Agent/TAgent/office/
+
+# 本机 MCP 运行时配置（含绝对路径，不入库；结构示例见 .mcp.example.json）
+.mcp.json
+
+# TAgent 运行时会话存档 / 上下文归档
+.agents/

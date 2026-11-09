@@ -56,11 +56,13 @@ class CurlTrafilaturaFetcher(WebPageFetcher):
     def __init__(self, curl_path: str | None = None,
                  timeout: float = _CURL_TIMEOUT,
                  max_html_bytes: int = _MAX_HTML_BYTES,
-                 min_body_chars: int = _MIN_BODY_CHARS) -> None:
+                 min_body_chars: int = _MIN_BODY_CHARS,
+                 connect_timeout: float = _CURL_CONNECT_TIMEOUT) -> None:
         self._curl = curl_path or self._resolve_curl()
         self._timeout = timeout
         self._max_html_bytes = max_html_bytes
         self._min_body_chars = min_body_chars
+        self._connect_timeout = connect_timeout
 
     # ------------------------------------------------------------------
     def fetch(self, url: str) -> WebDocument:
@@ -79,7 +81,7 @@ class CurlTrafilaturaFetcher(WebPageFetcher):
             "--show-error",            # 但出错时把原因打到 stderr
             "--location",              # 跟随重定向
             "--max-redirs", "5",
-            "--connect-timeout", str(_CURL_CONNECT_TIMEOUT),
+            "--connect-timeout", str(int(self._connect_timeout)),
             "--max-time", str(int(self._timeout)),
             "--max-filesize", str(self._max_html_bytes),
             "--user-agent", (

@@ -16,6 +16,11 @@
     │   └── FileSystemError         本地文件操作失败（业务语义）
     ├── FrontendError               界面加载失败（目录不存在 / 依赖缺失 / 未实现 Frontend）
     ├── SearchError                 联网搜索错误（缺配置 / 网络失败 / API 返回错误 / 响应格式异常）
+    ├── McpError                    MCP 配置 / 连接 / 工具调用错误
+    │   ├── McpConfigError          .mcp.json 不可读或结构非法
+    │   ├── McpConnectionError      连不上某台 MCP Server（只影响该服务器）
+    │   ├── McpToolCallError        转发调用失败（超时 / 协议错误 / 服务器报错）
+    │   └── McpToolNotFoundError    调用了不存在的 MCP 工具
     └── LLMError                    大模型通信错误
         ├── LLMConnectionError      网络不可达
         ├── LLMTimeoutError         请求超时
@@ -349,6 +354,61 @@ class CliExecutionError(CliError):
 
 
 # ==========================================================================
+# MCP（Model Context Protocol）
+# ==========================================================================
+class McpError(TAgentError):
+    """MCP 相关的所有错误的基类。
+
+    与 `SkillError` / `CliError` 同理：连接失败与调用失败都会被转成
+    `ToolOutcome.failure`，让模型看到明确的失败原因，而不是让会话崩掉。
+    启动阶段某一台服务器连不上，也只是「少了一批工具」，不影响本地工具。
+    """
+
+    kind = "mcp"
+
+
+class McpConfigError(McpError):
+    """`.mcp.json` 无法读取或顶层结构非法（单条服务器配置非法只会跳过该条）。"""
+
+
+class McpConnectionError(McpError):
+    """无法连接 MCP Server：进程启动失败、网络不可达、握手失败、超时等。"""
+
+    def __init__(self, server: str, message: str = "", detail: str = "") -> None:
+        text = "无法连接 MCP Server「%s」" % server
+        if message:
+            text += "：%s" % message
+        if detail:
+            text += "（%s）" % detail
+        super().__init__(text, server=server)
+        self.server = server
+
+
+class McpToolCallError(McpError):
+    """调用 MCP 工具失败：未连接、超时、协议错误或服务器返回 JSON-RPC 错误。"""
+
+    def __init__(self, server: str, tool: str, message: str = "") -> None:
+        text = "调用 MCP 工具 %s（服务器 %s）失败" % (tool or "?", server or "?")
+        if message:
+            text += "：%s" % message
+        super().__init__(text, server=server, tool=tool)
+        self.server = server
+        self.tool = tool
+
+
+class McpToolNotFoundError(McpError):
+    """模型请求了一个不存在的 MCP 工具（通常是把名字记错或服务器已断开）。"""
+
+    def __init__(self, name: str, available: "list[str] | None" = None) -> None:
+        message = "未知的 MCP 工具：%s。" % name
+        if available:
+            message += "当前可用：%s。" % "、".join(available[:20])
+        super().__init__(message, name=name, available=available or [])
+        self.name = name
+        self.available = list(available or [])
+
+
+# ==========================================================================
 # LLM 通信
 # ==========================================================================
 class LLMError(TAgentError):
@@ -400,3 +460,39 @@ class LLMStreamError(LLMError):
 
     def __init__(self, message: str = "") -> None:
         super().__init__(message or "接口在流式响应中返回了错误对象。")
+
+
+# ==========================================================================
+# 上下文压缩
+# ==========================================================================
+class ContextError(TAgentError):
+    """上下文压缩 / 归档 / 检索相关错误的基类。"""
+
+    kind = "context"
+
+
+class ContextArchiveError(ContextError):
+    """原始上下文归档保存失败（此时会话保持原样，可重试 /compact）。"""
+
+
+class ContextCompactError(ContextError):
+    """上下文压缩失败（归档可能已保存，但会话历史未被替换）。"""
+
+
+# ==========================================================================
+# 会话存档
+# ==========================================================================
+class SessionError(TAgentError):
+    """会话保存 / 读取 / 删除失败。"""
+
+    kind = "session"
+
+
+class SessionNotFoundError(SessionError):
+    """要恢复的会话不存在（可能已被删除或文件名不符）。"""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__("找不到会话「%s」，可能已被删除。" % session_id)
+
+
+__all__ = [name for name in dir() if name[0].isupper() and not name.startswith("__")]

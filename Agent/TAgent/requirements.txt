@@ -7,6 +7,16 @@ requests>=2.31.0
 textual>=8.0.0
 trafilatura>=2.0.0
 
+# MCP Client：连接外部 MCP Server（stdio / Streamable HTTP / SSE）。
+# 只出现在 core/infrastructure/mcp/ 下；不装则 MCP 功能不可用，
+# 本地工具与 Skills 照常工作（启动时会给出明确的缺失提示）。
+mcp>=2.0.0
+
+# Web 界面（python run.py --ui web）额外需要 starlette + uvicorn。
+# 只出现在 web/ 下；不装也能用 TUI。浏览器端另有一套 npm 工程（frontend/）。
+starlette>=0.37
+uvicorn>=0.30
+
 # 可选：装上后用 PyYAML 解析 SKILL.md 的 YAML Frontmatter；
 # 不装也能跑——内置了最小解析器（key: value + | / > 块标量）
 # pyyaml>=6.0

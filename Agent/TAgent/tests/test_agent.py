@@ -120,12 +120,17 @@ class ContainerTest(unittest.TestCase):
             llm=ScriptedLLMClient([{"text": "ok"}]),
             search_paths=[os.path.join(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__))), "config.ini")],
+            # 单元测试不依赖网络：显式关闭 MCP（否则会去连 .mcp.json 里的服务器），
+            # 工具数才是稳定的本地工具数量。
+            overrides={"mcp_enabled": False},
         )
-        self.assertEqual(len(container.tools.all()), 17)
+        self.assertEqual(len(container.tools.all()), 18)
         ctx = container.build_context(initial_prompt="hi")
         self.assertIsNotNone(ctx.session)
         self.assertIsNotNone(ctx.new_session)
         self.assertEqual(ctx.initial_prompt, "hi")
+        # MCP 关闭时状态栏不应出现相关摘要
+        self.assertEqual(ctx.metadata.get("mcp"), "")
 
 
 if __name__ == "__main__":

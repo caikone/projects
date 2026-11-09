@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -24,6 +25,11 @@ class Session:
     system_prompt: str | None = None
     #: 历史上限（0 = 不限制）；超出时从最早的非 system 消息开始丢弃
     history_limit: int = 0
+    #: 创建 / 最后更新时间（Unix 秒），供 /resume 列表排序展示
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    #: 已注入的 AGENTS.md 路径（非空表示注入过了，避免重复追加）
+    agents_doc: str = ""
 
     # ------------------------------------------------------------------
     def __post_init__(self) -> None:
@@ -40,6 +46,7 @@ class Session:
 
     def add(self, message: ChatMessage) -> None:
         self.messages.append(message)
+        self.updated_at = time.time()
         self._trim()
 
     def add_user(self, content: str) -> ChatMessage:
@@ -54,6 +61,17 @@ class Session:
         self.add(message)
         return message
 
+    def insert_after_system(self, message: ChatMessage) -> int:
+        """把消息插到 System Prompt 之后（AGENTS.md 等长期约定用）。
+
+        放在历史最前面有两个好处：模型每轮都能看到；位置固定，前缀稳定，
+        服务端的 Prompt 缓存可以持续命中。
+        """
+        index = 1 if self.messages and self.messages[0].role == Role.SYSTEM else 0
+        self.messages.insert(index, message)
+        self.updated_at = time.time()
+        return index
+
     def snapshot(self) -> list[ChatMessage]:
         """返回当前完整上下文（供请求使用）。"""
         return list(self.messages)
@@ -63,6 +81,17 @@ class Session:
         self.messages = ([ChatMessage.system(self.system_prompt)]
                          if self.system_prompt else [])
         self.title = ""
+        self.updated_at = time.time()
+
+    def replace_history(self, messages: list[ChatMessage]) -> None:
+        """整体替换非 system 历史（上下文压缩后使用）。
+
+        系统提示词始终保留：压缩只改变「聊过什么」，
+        不改变 Agent 的能力定义。
+        """
+        system = [m for m in self.messages if m.role == Role.SYSTEM]
+        self.messages = system + list(messages)
+        self.updated_at = time.time()
 
     def stats(self) -> dict[str, int]:
         """会话统计信息（UI 状态栏用）。"""

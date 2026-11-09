@@ -30,6 +30,20 @@ from ...ports.llm import LLMChunk, LLMClient, LLMRequest, ToolCallDelta
 MAX_ERROR_BODY = 500
 
 
+def _rejects_stream_options(body: str) -> bool:
+    """判断 400 响应是否因为服务端不认识 `stream_options` 字段。
+
+    自建网关常见的报错形态有 ``unknown field "stream_options"``、
+    ``Unrecognized request argument``、``unsupported parameter: stream_options``。
+    """
+    lowered = (body or "").lower()
+    if "stream_options" in lowered or "stream options" in lowered:
+        return True
+    return (("unknown" in lowered or "unrecognized" in lowered
+             or "unsupported" in lowered or "invalid" in lowered)
+            and "usage" in lowered)
+
+
 class OpenAICompatibleClient(LLMClient):
     """OpenAI 兼容 `/chat/completions` 流式客户端。"""
 
@@ -48,7 +62,7 @@ class OpenAICompatibleClient(LLMClient):
             "Content-Type": "application/json",
         }
 
-    def _payload(self, request: LLMRequest) -> dict[str, Any]:
+    def _payload(self, request: LLMRequest, include_usage: bool = True) -> dict[str, Any]:
         from ...domain.messages import to_openai_payload
 
         payload: dict[str, Any] = {
@@ -56,6 +70,10 @@ class OpenAICompatibleClient(LLMClient):
             "messages": to_openai_payload(request.messages),
             "stream": True,
         }
+        # 让厂商在流的最后一帧带上 token 用量，供上下文压缩判断
+        # （OpenAI 兼容服务默认不返回；不支持的厂商会在 _post 里自动去掉重试）
+        if include_usage:
+            payload["stream_options"] = {"include_usage": True}
         if request.tool_specs:
             payload["tools"] = request.tool_specs
         if self._settings.temperature is not None:
@@ -114,12 +132,27 @@ class OpenAICompatibleClient(LLMClient):
 
     # ------------------------------------------------------------------
     def _post(self, request: LLMRequest) -> requests.Response:
+        response = self._post_once(request, include_usage=True)
+        if response.status_code == 400:
+            body = ""
+            try:
+                body = response.text[:MAX_ERROR_BODY]
+            except Exception:  # pragma: no cover - 读取失败不影响判定
+                body = ""
+            # 部分兼容实现在遇到未知字段时直接 400：去掉 stream_options 再试一次，
+            # 宁可拿不到精确 usage，也不能让整轮对话失败。
+            if _rejects_stream_options(body):
+                response.close()
+                return self._post_once(request, include_usage=False)
+        return response
+
+    def _post_once(self, request: LLMRequest, include_usage: bool) -> requests.Response:
         url = self._settings.chat_completions_url
         try:
             response = self._session.post(
                 url,
                 headers=self._headers(),
-                json=self._payload(request),
+                json=self._payload(request, include_usage=include_usage),
                 timeout=self._settings.timeout,
                 stream=True,
             )

@@ -612,7 +612,7 @@ class SkillCoordinationTest(unittest.TestCase):
         self.assertIn("createSkill", names)
         self.assertIn("RunCli", names)      # 既有工具一个都不能少
         self.assertIn("fetchWeb", names)
-        self.assertEqual(len(container.tools.all()), 17)
+        self.assertEqual(len(container.tools.all()), 18)
 
     def test_system_prompt_carries_skill_catalog(self) -> None:
         from core.container import AppContainer

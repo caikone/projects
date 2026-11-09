@@ -73,12 +73,19 @@ def main(argv: list[str] | None = None) -> int:
         from core.container import AppContainer
 
         overrides = {"max_tool_rounds": args.max_rounds} if args.max_rounds else None
-        container = AppContainer.build(config_path=args.config, overrides=overrides)
+        container = AppContainer.build(config_path=args.config, overrides=overrides,
+                                      defer_mcp=frontend.defer_mcp)
     except ConfigError as exc:
         print("[配置错误] %s" % exc, file=sys.stderr)
         return 1
 
     # 4) 交给界面
+    if container.config_created:
+        # TUI 会弹对话框；其它界面靠这行提示，避免用户以为已经配好了
+        print("[配置] 已生成 %s（当前是占位 mock 信息），"
+              "请修改 [llm] 段后重新启动。" % container.config_source,
+              file=sys.stderr)
+
     initial_prompt = " ".join(args.prompt).strip() or None
     ctx = container.build_context(initial_prompt=initial_prompt)
 

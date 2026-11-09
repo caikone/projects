@@ -10,3 +10,9 @@ venv/
 dist/
 build/
 installer_output/
+
+# 上下文压缩产生的本地归档（运行时数据，不应入库）
+.agents/context/
+
+# 会话存档与事件日志（运行时数据，不应入库）
+.agents/sessions/

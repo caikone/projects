@@ -109,3 +109,44 @@ class ErrorOccurred(AgentEvent):
     message: str = ""
     error_type: str = "error"
     recoverable: bool = True
+
+
+@dataclass(slots=True)
+class ContextUsageUpdated(AgentEvent):
+    """上下文用量刷新（每次模型响应后发出，供状态栏与阈值告警使用）。"""
+
+    used_tokens: int = 0
+    window_tokens: int = 0
+    percent: int = 0
+    #: 窗口大小是否为「拿不到真实值」时的默认假设（UI 显示「默认」）
+    window_is_default: bool = False
+    #: 是否已达到压缩阈值（达到后 UI 应提示并暂停普通输入）
+    warning: bool = False
+    #: 用量是否来自模型 API（False = 本地估算）
+    from_api: bool = False
+
+
+@dataclass(slots=True)
+class ContextCompactStarted(AgentEvent):
+    """开始压缩上下文（压缩期间禁止工具调用与普通输入）。"""
+
+    archive_id: str = ""
+
+
+@dataclass(slots=True)
+class ContextCompacted(AgentEvent):
+    """上下文压缩成功：历史已被摘要替换。"""
+
+    archive_id: str = ""
+    archive_path: str = ""
+    message_count: int = 0
+    tokens_before: int = 0
+    tokens_after: int = 0
+    summary_truncated: bool = False
+
+
+@dataclass(slots=True)
+class ContextCompactFailed(AgentEvent):
+    """上下文压缩失败：原始上下文保持不变，可重试。"""
+
+    message: str = ""

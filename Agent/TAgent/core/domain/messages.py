@@ -124,6 +124,51 @@ class ChatMessage:
             payload["tool_calls"] = [tc.to_openai() for tc in self.tool_calls]
         return payload
 
+    # ------------------------------------------------------------------
+    # 会话持久化（与 OpenAI 协议解耦的纯数据格式）
+    # ------------------------------------------------------------------
+    def to_dict(self) -> dict[str, Any]:
+        """序列化成可写入 JSON 的字典（会话存档用）。"""
+        data: dict[str, Any] = {"role": self.role.value}
+        if self.content is not None:
+            data["content"] = self.content
+        if self.name:
+            data["name"] = self.name
+        if self.tool_call_id:
+            data["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            data["tool_calls"] = [
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments_json}
+                for tc in self.tool_calls
+            ]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ChatMessage":
+        """从存档字典还原消息（对缺字段 / 脏数据尽量宽容）。"""
+        role_text = str(data.get("role") or Role.USER.value)
+        try:
+            role = Role(role_text)
+        except ValueError:
+            role = Role.USER
+        calls = [
+            ToolCall(
+                id=str(item.get("id") or ""),
+                name=str(item.get("name") or ""),
+                arguments_json=str(item.get("arguments") or "{}"),
+            )
+            for item in data.get("tool_calls") or []
+            if isinstance(item, dict)
+        ]
+        content = data.get("content")
+        return cls(
+            role=role,
+            content=None if content is None else str(content),
+            name=data.get("name") or None,
+            tool_calls=calls,
+            tool_call_id=data.get("tool_call_id") or None,
+        )
+
 
 def to_openai_payload(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     """把领域消息列表转换成 OpenAI 兼容的请求体 messages。"""

@@ -21,6 +21,7 @@ from ..domain.events import (
     AgentEvent,
     AssistantMessageCompleted,
     AssistantTextDelta,
+    ContextUsageUpdated,
     ErrorOccurred,
     RoundFinished,
     ToolCallCompleted,
@@ -32,6 +33,7 @@ from ..domain.messages import ChatMessage, ToolCall
 from ..errors import LLMError
 from ..ports.llm import LLMClient, LLMRequest
 from ..ports.tools import ToolRegistry, ToolSpec
+from .context import ContextService
 from .session import Session
 from .tool_executor import ToolExecutor
 
@@ -43,12 +45,15 @@ class AgentService:
         llm:      LLM 端口实现（如 `OpenAICompatibleClient`）。
         tools:    工具注册表。
         settings: 运行时配置。
+        context:  上下文压缩服务（可选）；提供后每次响应结束都会上报用量。
     """
 
-    def __init__(self, llm: LLMClient, tools: ToolRegistry, settings: AgentSettings) -> None:
+    def __init__(self, llm: LLMClient, tools: ToolRegistry, settings: AgentSettings,
+                 context: ContextService | None = None) -> None:
         self._llm = llm
         self._tools = tools
         self._settings = settings
+        self._context = context
         self._executor = ToolExecutor(tools)
         self._cancel = threading.Event()
         self._specs_cache: list[dict] | None = None
@@ -64,6 +69,11 @@ class AgentService:
     def tools(self) -> ToolRegistry:
         return self._tools
 
+    @property
+    def context(self) -> ContextService | None:
+        """上下文压缩服务（未装配时为 None）。"""
+        return self._context
+
     def available_tools(self) -> list[ToolSpec]:
         """当前可用工具的声明列表（UI 侧栏展示用）。"""
         return [tool.spec for tool in self._tools.all()]
@@ -73,6 +83,14 @@ class AgentService:
         if self._specs_cache is None:
             self._specs_cache = self._tools.specs()
         return self._specs_cache
+
+    def refresh_tools(self) -> int:
+        """工具集合发生变化后调用（如 MCP 在后台加载完成）。
+
+        返回当前工具数量，方便 UI 顺手刷新状态栏。
+        """
+        self._specs_cache = None
+        return len(self._tools.all())
 
     # ------------------------------------------------------------------
     # 取消控制（供 TUI 的 Ctrl+C / 停止按钮调用）
@@ -122,7 +140,7 @@ class AgentService:
         for round_index in range(1, self._settings.max_tool_rounds + 1):
             rounds = round_index
             try:
-                text, tool_calls = yield from self._run_round(
+                text, tool_calls, api_usage = yield from self._run_round(
                     turn_id=turn_id, round_index=round_index, messages=messages)
             except LLMError as exc:
                 yield ErrorOccurred(turn_id=turn_id, message=exc.message, error_type=exc.kind)
@@ -138,6 +156,11 @@ class AgentService:
                 answer_parts.append(text)
             yield AssistantMessageCompleted(
                 turn_id=turn_id, content=text, round_index=round_index)
+
+            # 每次模型响应后上报上下文用量（优先用 API 的精确值）
+            usage_event = self._usage_event(session, api_usage)
+            if usage_event is not None:
+                yield usage_event
 
             if self._cancel.is_set():
                 cancelled = True
@@ -192,9 +215,24 @@ class AgentService:
         )
 
     # ------------------------------------------------------------------
+    def _usage_event(self, session: Session,
+                     api_usage: dict | None) -> ContextUsageUpdated | None:
+        """把当前上下文用量打包成事件（未装配压缩服务时返回 None）。"""
+        if self._context is None:
+            return None
+        snapshot = self._context.usage(session, self.tool_specs(), api_usage=api_usage)
+        return ContextUsageUpdated(
+            used_tokens=snapshot.used_tokens,
+            window_tokens=snapshot.window_tokens,
+            percent=snapshot.percent,
+            window_is_default=snapshot.window_is_default,
+            warning=self._context.should_warn(snapshot),
+            from_api=snapshot.from_api,
+        )
+
     def _run_round(self, turn_id: int, round_index: int,
                    messages: list[ChatMessage]) -> Iterator[AgentEvent]:
-        """发起一次流式请求，yield 文本增量，结束时返回 (文本, 工具调用列表)。"""
+        """发起一次流式请求，yield 文本增量，结束时返回 (文本, 工具调用, usage)。"""
         request = LLMRequest(
             messages=list(messages),
             tool_specs=self.tool_specs(),
@@ -205,6 +243,7 @@ class AgentService:
         text_parts: list[str] = []
         slots: dict[int, dict[str, str]] = {}
         finish_reason: str | None = None
+        api_usage: dict | None = None
 
         for chunk in self._llm.stream(request):
             if self._cancel.is_set():
@@ -214,6 +253,9 @@ class AgentService:
                 yield AssistantTextDelta(turn_id=turn_id, text=chunk.text)
             if chunk.finish_reason:
                 finish_reason = chunk.finish_reason
+            if chunk.usage:
+                # 部分厂商在最后一帧单独下发 usage，取最后一个非空值
+                api_usage = dict(chunk.usage)
 
             for delta in chunk.tool_call_deltas:
                 slot = slots.setdefault(
@@ -242,7 +284,7 @@ class AgentService:
             )
             for i in sorted(slots)
         ]
-        return "".join(text_parts), tool_calls
+        return "".join(text_parts), tool_calls, api_usage
 
     # ------------------------------------------------------------------
     def close(self) -> None:

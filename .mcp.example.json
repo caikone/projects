@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "Bazi-MCP": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@openfate/bazi-mcp"],
+      "timeout": 120
+    },
+    "AnythingLLM": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "<仓库绝对路径>/Agent/TAgent/scripts/mcp_stdio_bridge.py",
+        "<AnythingLLM_MCP 目录绝对路径>",
+        "server"
+      ],
+      "timeout": 120
+    },
+    "PetHospital": {
+      "type": "stdio",
+      "command": "<pet_hospital_mcp 虚拟环境 python 绝对路径>",
+      "args": [
+        "<仓库绝对路径>/Agent/TAgent/scripts/mcp_stdio_bridge.py",
+        "<pet_hospital_mcp 目录绝对路径>",
+        "pet_hospital_mcp.server"
+      ],
+      "env": {
+        "PET_HOSPITAL_BASE_URL": "http://127.0.0.1:8080"
+      },
+      "timeout": 60
+    }
+  }
+}
